@@ -15,19 +15,20 @@ GRID is a systematic, multi-agent trading intelligence platform. It ingests macr
 
 ```bash
 # Database
-cd grid && docker compose up -d          # Start PostgreSQL + TimescaleDB
+cd grid && docker compose up -d                    # Start PostgreSQL + TimescaleDB
 
 # Backend
 cd grid && pip install -r requirements.txt
 cd grid && python -m uvicorn api.main:app --reload --port 8000
 
 # Frontend
-cd grid/pwa && npm install && npm run dev  # Dev server on :5173
-cd grid/pwa && npm run build               # Production build
+cd grid/pwa && npm install && npm run dev          # Dev server on :5173
+cd grid/pwa && npm run build                       # Production build
 
 # Tests
-cd grid && python -m pytest tests/ -v
-cd grid && python -m pytest tests/test_pit.py -v  # PIT store tests specifically
+cd grid && python -m pytest tests/ -v              # Full suite
+cd grid && python -m pytest tests/test_pit.py -v   # PIT store tests
+cd grid && python -m pytest tests/test_api.py -v   # API tests
 ```
 
 ## Architecture Rules
@@ -37,33 +38,48 @@ cd grid && python -m pytest tests/test_pit.py -v  # PIT store tests specifically
 </important>
 
 <important if="writing SQL or database queries">
-**Never use string `.format()` or f-strings for SQL.** Always use parameterized queries via SQLAlchemy. See ATTENTION.md items #1 for existing SQL injection bugs that need fixing.
+**Never use string `.format()` or f-strings for SQL.** Always use parameterized queries via SQLAlchemy. Active SQL injection bugs exist in `regime.py:85-93` and `journal/log.py:241` — fix these on sight.
 </important>
 
 <important if="adding or modifying data sources">
-**Multi-source conflict resolution** goes through `normalization/resolver.py`. Every new data source needs: an ingestion module, entity mapping in `entity_map.py`, and PIT-compatible timestamps.
+**Multi-source conflict resolution** goes through `normalization/resolver.py`. Every new data source needs: an ingestion module, entity mapping in `entity_map.py`, and PIT-compatible timestamps. Use the scheduler pattern from `ingestion/scheduler.py`.
 </important>
 
-## Key Architectural Patterns
+<important if="modifying journal or decision logging code">
+**Immutable Journal** — entries in `journal/log.py` must never be updated or deleted. Every recommendation gets logged with full provenance. Validate confidence/probability are 0-1 and not NaN/infinity.
+</important>
+
+## Key Patterns
 
 - **Model Governance:** CANDIDATE → SHADOW → STAGING → PRODUCTION (see `governance/registry.py`)
-- **Immutable Journal:** Every recommendation logged in `journal/log.py` — never delete entries
 - **Graceful Degradation:** Hyperspace/Ollama calls return `None` if offline; system operates without them
 - **Config:** All settings via `config.py` (pydantic-settings). Copy `.env.example` to `.env`
+- **Logging:** `loguru` imported as `log` from config — use throughout
+
+## Gotchas
+
+- `DISTINCT ON` in `store/pit.py` is PostgreSQL-specific — SQLite/MySQL will not work
+- `assert_no_lookahead()` raises ValueError but does NOT roll back the transaction (ATTENTION.md #8)
+- `_resolve_source_id()` auto-creates source_catalog entries — unknown sources can appear silently (#25)
+- `pd.to_numeric(errors="coerce")` in ingestion silently converts bad data to NaN (#13)
+- NaN handling varies across modules (ffill limits, dropna timing) — follow the existing module's pattern (#14)
+- Two scheduler files exist (`scheduler.py`, `scheduler_v2.py`) — `scheduler.py` is authoritative (#39)
 
 ## Code Style
 
-- Use `loguru` for logging (imported as `log` from config)
 - Type hints on all new functions
 - Follow existing patterns in each module — don't introduce new frameworks
 - Keep API routes thin; business logic belongs in domain modules
+- Every new module needs a test file in `grid/tests/`
 
-## Known Issues
+## Workflow Best Practices
 
-See `grid/ATTENTION.md` for the full 40-item audit. Critical items:
-1. SQL injection in `regime.py` and `journal/log.py` (use parameterized queries)
-2. Weak JWT secret default (must set `GRID_JWT_SECRET` in production)
-3. Default DB password "changeme" (must change for production)
+- Start complex tasks in **plan mode** before execution
+- Use subagents for independent subtasks (parallel investigation, code review)
+- Perform `/compact` at ~50% context usage on long sessions
+- Break work into phases — verify each phase works before moving to the next
+- After fixing a bug, confirm the fix with a test — don't just eyeball it
+- Reference `grid/ATTENTION.md` for the full 40-item audit when fixing issues
 
 ## Directory Structure
 
@@ -72,7 +88,7 @@ grid/
 ├── api/           # FastAPI routes and auth
 ├── ingestion/     # 37+ data source pullers (FRED, BLS, ECB, etc.)
 ├── normalization/ # Multi-source conflict resolution
-├── store/         # PIT-correct query engine
+├── store/         # PIT-correct query engine (PostgreSQL DISTINCT ON)
 ├── features/      # Feature engineering (z-score, slopes, ratios)
 ├── discovery/     # Unsupervised regime clustering
 ├── validation/    # Walk-forward backtesting gates
