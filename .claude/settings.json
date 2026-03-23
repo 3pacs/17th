@@ -1,0 +1,31 @@
+{
+  "permissions": {
+    "allow": [
+      "Edit(*)",
+      "Write(*)",
+      "Glob(*)",
+      "Grep(*)",
+      "Read(*)",
+      "WebFetch(domain:docs.anthropic.com)",
+      "WebFetch(domain:fastapi.tiangolo.com)",
+      "WebFetch(domain:docs.sqlalchemy.org)"
+    ],
+    "deny": [],
+    "ask": [
+      "Bash(rm *)",
+      "Bash(docker *)",
+      "Bash(git push *)",
+      "Bash(git reset *)",
+      "Bash(pip install *)",
+      "Bash(npm install *)"
+    ]
+  },
+  "env": {
+    "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE": "60"
+  },
+  "attribution": {
+    "commit": "Co-Authored-By: Claude <noreply@anthropic.com>"
+  },
+  "respectGitignore": true,
+  "enableAllProjectMcpServers": true
+}
