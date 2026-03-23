@@ -4,6 +4,10 @@
 
 GRID is a systematic, multi-agent trading intelligence platform. It ingests macroeconomic/market data from 37+ global sources, resolves multi-source conflicts using point-in-time (PIT) correct methodology, performs unsupervised regime discovery, and runs walk-forward backtesting with an immutable decision journal.
 
+## Server Deployment
+
+- Repo location on server: `~/grid_v4` (user: `grid`, host: `grid-svr`)
+
 ## Tech Stack
 
 - **Backend:** Python 3.11+, FastAPI, SQLAlchemy 2.0, PostgreSQL 15 + TimescaleDB
