@@ -7,9 +7,11 @@ GRID is a systematic, multi-agent trading intelligence platform. It ingests macr
 ## Server Deployment
 
 - Repo location on server: `~/grid_v4` (user: `grid`, host: `grid-svr`)
-- **No systemd service** — uvicorn runs as a background process
-- Restart server: `kill $(pgrep -f uvicorn) && cd ~/grid_v4/grid_repo/grid && python3 -m uvicorn api.main:app --host 0.0.0.0 --port 8000 &`
-- Check if running: `ps aux | grep uvicorn`
+- **Systemd services** for all components (grid-api, grid-llamacpp, grid-crucix, grid-hermes, grid-coordinator, grid-worker, cloudflared)
+- Restart all: `sudo systemctl restart grid-api grid-llamacpp grid-crucix grid-hermes`
+- **Public URL**: `https://grid.stepdad.finance` (Cloudflare Tunnel, no port forwarding)
+- **Role-based auth**: admin (master password) and contributor (user accounts)
+- See `docs/SERVER-SERVICES.md` for full service reference
 
 ## Tech Stack
 
