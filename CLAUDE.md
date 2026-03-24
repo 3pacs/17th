@@ -7,6 +7,9 @@ GRID is a systematic, multi-agent trading intelligence platform. It ingests macr
 ## Server Deployment
 
 - Repo location on server: `~/grid_v4` (user: `grid`, host: `grid-svr`)
+- **No systemd service** — uvicorn runs as a background process
+- Restart server: `kill $(pgrep -f uvicorn) && cd ~/grid_v4/grid_repo/grid && python3 -m uvicorn api.main:app --host 0.0.0.0 --port 8000 &`
+- Check if running: `ps aux | grep uvicorn`
 
 ## Tech Stack
 
