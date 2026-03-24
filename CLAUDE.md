@@ -83,25 +83,31 @@ cd grid && python -m pytest tests/test_api.py -v   # API tests
 - Perform `/compact` at ~50% context usage on long sessions
 - Break work into phases — verify each phase works before moving to the next
 - After fixing a bug, confirm the fix with a test — don't just eyeball it
-- Reference `grid/ATTENTION.md` for the full 40-item audit when fixing issues
+- Reference `grid/ATTENTION.md` for the full 64-item audit when fixing issues
 
 ## Directory Structure
 
 ```
 grid/
-├── api/           # FastAPI routes and auth
+├── api/           # FastAPI routes, auth, middleware (14 routers)
+├── alerts/        # Email alerting system (failure, regime, 100x, digest)
 ├── ingestion/     # 37+ data source pullers (FRED, BLS, ECB, etc.)
 ├── normalization/ # Multi-source conflict resolution
 ├── store/         # PIT-correct query engine (PostgreSQL DISTINCT ON)
-├── features/      # Feature engineering (z-score, slopes, ratios)
-├── discovery/     # Unsupervised regime clustering
+├── features/      # Feature engineering + importance tracking
+├── discovery/     # Unsupervised regime clustering + options scanner
 ├── validation/    # Walk-forward backtesting gates
 ├── inference/     # Live model scoring
 ├── journal/       # Immutable decision log
 ├── governance/    # Model lifecycle state machine
 ├── agents/        # TradingAgents multi-agent framework
-├── hyperspace/    # Local LLM inference layer
-├── ollama/        # Ollama integration + market knowledge
-├── pwa/           # React 18 PWA frontend
-└── tests/         # pytest suite
+├── hyperspace/    # Local LLM inference layer (P2P)
+├── ollama/        # Ollama integration + market briefings
+├── llamacpp/      # llama.cpp direct inference
+├── outputs/       # LLM insight logging + scanner
+├── server_log/    # Git-backed error logging + operator inbox
+├── pwa/           # React 18 PWA frontend (Zustand, Vite)
+├── docs/          # Architecture, API, deployment, development guides
+├── tests/         # pytest suite (354 tests)
+└── scripts/       # Migration and utility scripts
 ```
