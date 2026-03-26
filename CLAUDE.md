@@ -47,7 +47,7 @@ cd grid && python -m pytest tests/test_api.py -v   # API tests
 </important>
 
 <important if="writing SQL or database queries">
-**Never use string `.format()` or f-strings for SQL.** Always use parameterized queries via SQLAlchemy. Active SQL injection bugs exist in `regime.py:85-93` and `journal/log.py:241` — fix these on sight.
+**Never use string `.format()` or f-strings for SQL.** Always use parameterized queries via SQLAlchemy.
 </important>
 
 <important if="adding or modifying data sources">
