@@ -3,7 +3,7 @@ import {
     Home, Radar, BookOpen, FlaskConical, Bot, Settings, FileText,
     Workflow, Atom, Terminal, TrendingUp, BarChart3, Globe, Layers,
     Activity, Menu, X, ChevronRight, Network, Crosshair, GitBranch,
-    Database, Eye, Camera, ListChecks,
+    Database, Eye, Camera, ListChecks, Mail,
 } from 'lucide-react';
 
 const menuSections = [
@@ -43,6 +43,7 @@ const menuSections = [
         label: 'OPERATIONS',
         items: [
             { id: 'operator', icon: Eye, label: 'Operator', desc: 'Hermes operator dashboard' },
+            { id: 'hermes-inbox', icon: Mail, label: 'Inbox', desc: 'Hermes email intelligence' },
             { id: 'snapshots', icon: Camera, label: 'Snapshots', desc: 'PIT analytical snapshots' },
             { id: 'workflows', icon: Workflow, label: 'Workflows', desc: 'Data & compute pipelines' },
             { id: 'weights', icon: Settings, label: 'Weights', desc: 'Tune regime feature influence' },

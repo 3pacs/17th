@@ -523,6 +523,28 @@ class GRIDApi {
             this._ws = null;
         }
     }
+
+    // Inbox (Hermes)
+    async getInboxMessages(status = '', limit = 50, category = '') {
+        const params = new URLSearchParams();
+        if (status) params.set('status', status);
+        if (limit) params.set('limit', String(limit));
+        if (category) params.set('category', category);
+        return this._fetch(`/api/v1/inbox/messages?${params}`);
+    }
+    async getInboxMessage(id) {
+        return this._fetch(`/api/v1/inbox/messages/${id}`);
+    }
+    async getInboxActionItems(status = '') {
+        const qs = status ? `?status=${encodeURIComponent(status)}` : '';
+        return this._fetch(`/api/v1/inbox/action-items${qs}`);
+    }
+    async archiveInboxMessage(id) {
+        return this._fetch(`/api/v1/inbox/messages/${id}/archive`, { method: 'POST' });
+    }
+    async getInboxStats() {
+        return this._fetch('/api/v1/inbox/stats');
+    }
 }
 
 export const api = new GRIDApi();

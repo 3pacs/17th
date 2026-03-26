@@ -49,6 +49,7 @@ from api.routers.flows import router as flows_router
 from api.routers.trading import router as trading_router
 from api.routers.astrogrid import router as astrogrid_router
 from api.routers.viz import router as viz_router
+from api.routers.inbox import router as inbox_router
 
 _environment = os.getenv("ENVIRONMENT", "development")
 _start_time = time.time()
@@ -408,6 +409,7 @@ app.include_router(flows_router)
 app.include_router(trading_router)
 app.include_router(astrogrid_router)
 app.include_router(viz_router)
+app.include_router(inbox_router)
 
 # WebSocket connections
 _ws_clients: set[WebSocket] = set()

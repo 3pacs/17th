@@ -33,6 +33,7 @@ import WatchlistAnalysis from './views/WatchlistAnalysis.jsx';
 import Operator from './views/Operator.jsx';
 import Snapshots from './views/Snapshots.jsx';
 import VizDashboard from './views/VizDashboard.jsx';
+import HermesInbox from './views/HermesInbox.jsx';
 
 const styles = {
     app: {
@@ -141,6 +142,7 @@ function App() {
             case 'operator': return <Operator />;
             case 'snapshots': return <Snapshots />;
             case 'viz-dashboard': return <VizDashboard />;
+            case 'hermes-inbox': return <HermesInbox />;
             case 'settings': return <Settings onLogout={() => { clearAuth(); }} />;
             default: return <Dashboard onNavigate={navigate} />;
         }

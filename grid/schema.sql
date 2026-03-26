@@ -661,3 +661,33 @@ BEGIN
         ALTER TABLE model_registry ADD COLUMN model_type TEXT DEFAULT 'rule_based';
     END IF;
 END $$;
+
+-- ============================================================
+-- TABLE: hermes_inbox
+-- Inbound email storage for Hermes LLM email processing.
+-- ============================================================
+CREATE TABLE IF NOT EXISTS hermes_inbox (
+    id                BIGSERIAL PRIMARY KEY,
+    received_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    from_address      TEXT NOT NULL,
+    subject           TEXT NOT NULL,
+    body_text         TEXT NOT NULL,
+    body_html         TEXT,
+    message_id        TEXT UNIQUE,
+    thread_id         TEXT,
+    -- LLM processing results
+    processed_at      TIMESTAMPTZ,
+    category          TEXT,
+    summary           TEXT,
+    action_items      JSONB,
+    notes             JSONB,
+    plans             JSONB,
+    sentiment         TEXT,
+    tickers_mentioned TEXT[],
+    hermes_response   TEXT,
+    status            TEXT NOT NULL DEFAULT 'pending'
+);
+
+CREATE INDEX IF NOT EXISTS idx_hermes_inbox_received ON hermes_inbox(received_at DESC);
+CREATE INDEX IF NOT EXISTS idx_hermes_inbox_status ON hermes_inbox(status);
+CREATE INDEX IF NOT EXISTS idx_hermes_inbox_category ON hermes_inbox(category);

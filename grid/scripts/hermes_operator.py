@@ -351,6 +351,7 @@ class OperatorState:
         self.last_oracle_cycle: datetime | None = None
         self.last_hypothesis_test: datetime | None = None
         self.last_backtest_scan: datetime | None = None
+        self.last_email_check: datetime | None = None
         self.consecutive_failures: int = 0
         self.cycle_count: int = 0
         self.fixes_applied: int = 0
@@ -1259,6 +1260,46 @@ def run_cycle(state: OperatorState, dry_run: bool = False) -> dict[str, Any]:
             cycle_result["daily_digest"] = digest_result
     except Exception as exc:
         log.warning("Daily digest failed: {e}", e=str(exc))
+
+    # 7b2. Hermes email check (every HERMES_EMAIL_CHECK_INTERVAL_MINUTES)
+    try:
+        from config import settings as _cfg
+        if _cfg.HERMES_EMAIL_ENABLED:
+            now_ec = datetime.now(timezone.utc)
+            minutes_since_email = 999
+            if state.last_email_check is not None:
+                minutes_since_email = (now_ec - state.last_email_check).total_seconds() / 60
+            if minutes_since_email >= _cfg.HERMES_EMAIL_CHECK_INTERVAL_MINUTES:
+                log.info("Hermes email check — polling inbox...")
+                if not dry_run:
+                    from alerts.email_ingest import HermesEmailIngest
+                    from alerts.email_processor import HermesEmailProcessor
+                    ingest = HermesEmailIngest(db_engine=engine)
+                    new_msgs = ingest.poll()
+                    cycle_result["email_ingest"] = {"new_messages": len(new_msgs)}
+
+                    if new_msgs:
+                        processor = HermesEmailProcessor(db_engine=engine)
+                        processed_count = processor.process_pending()
+                        cycle_result["email_processor"] = {"processed": processed_count}
+                        log.info(
+                            "Hermes email: {n} new, {p} processed",
+                            n=len(new_msgs), p=processed_count,
+                        )
+
+                    state.last_email_check = now_ec
+                else:
+                    log.info("[DRY RUN] Would check Hermes email inbox")
+    except Exception as exc:
+        log.warning("Hermes email check failed: {e}", e=str(exc))
+        log_issue(
+            engine, category="email", severity="WARNING",
+            title="Hermes email check failed",
+            detail=str(exc),
+            stack_trace=traceback.format_exc(),
+            fix_result="PENDING",
+            cycle_number=state.cycle_count,
+        )
 
     # 7c. 100x Digest (every 4 hours)
     try:

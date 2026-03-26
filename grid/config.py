@@ -148,6 +148,13 @@ class Settings(BaseSettings):
     ALERT_SMTP_PASSWORD: str = ""
     ALERT_SMTP_USE_TLS: bool = False
 
+    # Hermes inbound email (IMAP polling)
+    HERMES_EMAIL_ENABLED: bool = False
+    HERMES_EMAIL_IMAP_HOST: str = "imap.gmail.com"
+    HERMES_EMAIL_IMAP_PORT: int = 993
+    HERMES_EMAIL_CHECK_INTERVAL_MINUTES: int = 15
+    HERMES_EMAIL_ALLOWLIST: str = "stepdadfinance@gmail.com"
+
     # Market briefing schedules
     BRIEFING_CRON_DAILY: str = "0 6 * * 1-5"  # weekdays 6 AM
     BRIEFING_CRON_WEEKLY: str = "0 7 * * 1"   # Monday 7 AM
