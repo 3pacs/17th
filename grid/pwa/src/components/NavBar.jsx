@@ -1,70 +1,6 @@
 import React, { useState } from 'react';
-import {
-    Home, Radar, BookOpen, FlaskConical, Bot, Settings, FileText,
-    Workflow, Atom, Terminal, TrendingUp, BarChart3, Globe, Layers,
-    Activity, Menu, X, ChevronRight, Network, Crosshair, GitBranch,
-    Database, Eye, Camera, ListChecks, Mail,
-} from 'lucide-react';
-
-const menuSections = [
-    {
-        label: 'OVERVIEW',
-        items: [
-            { id: 'dashboard', icon: Home, label: 'Dashboard', desc: 'System overview & status' },
-            { id: 'regime', icon: Radar, label: 'Regime', desc: 'Current market regime state' },
-            { id: 'strategy', icon: Crosshair, label: 'Strategy', desc: 'Regime-linked action plans' },
-            { id: 'signals', icon: Activity, label: 'Signals', desc: 'Live feature values' },
-        ],
-    },
-    {
-        label: 'INTELLIGENCE',
-        items: [
-            { id: 'viz-dashboard', icon: Activity, label: 'Living Intel', desc: 'Real-time multi-chart intelligence' },
-            { id: 'briefings', icon: FileText, label: 'Briefings', desc: 'AI market analysis reports' },
-            { id: 'agents', icon: Bot, label: 'Agents', desc: 'Multi-agent deliberation' },
-            { id: 'discovery', icon: FlaskConical, label: 'Discovery', desc: 'Hypotheses & clustering' },
-            { id: 'flows', icon: GitBranch, label: 'Flows', desc: 'Sector flows, actors & influence' },
-            { id: 'derivatives', icon: BarChart3, label: 'Derivatives', desc: 'Vol surface, skew & GEX' },
-            { id: 'associations', icon: Network, label: 'Associations', desc: 'Feature correlations & anomalies' },
-            { id: 'models', icon: Layers, label: 'Models', desc: 'Model registry & governance' },
-            { id: 'knowledge', icon: Database, label: 'Knowledge', desc: 'Knowledge base & rules' },
-            { id: 'watchlist', icon: ListChecks, label: 'Watchlist', desc: 'Deep watchlist analysis' },
-        ],
-    },
-    {
-        label: 'PERFORMANCE',
-        items: [
-            { id: 'backtest', icon: TrendingUp, label: 'Backtest', desc: 'Track record & paper trades' },
-            { id: 'journal', icon: BookOpen, label: 'Journal', desc: 'Decision log & outcomes' },
-            { id: 'physics', icon: Atom, label: 'Physics', desc: 'Market dynamics verification' },
-        ],
-    },
-    {
-        label: 'OPERATIONS',
-        items: [
-            { id: 'operator', icon: Eye, label: 'Operator', desc: 'Hermes operator dashboard' },
-            { id: 'hermes-inbox', icon: Mail, label: 'Inbox', desc: 'Hermes email intelligence' },
-            { id: 'snapshots', icon: Camera, label: 'Snapshots', desc: 'PIT analytical snapshots' },
-            { id: 'workflows', icon: Workflow, label: 'Workflows', desc: 'Data & compute pipelines' },
-            { id: 'weights', icon: Settings, label: 'Weights', desc: 'Tune regime feature influence' },
-            { id: 'hyperspace', icon: Globe, label: 'Hyperspace', desc: 'Distributed compute node' },
-            { id: 'system', icon: Terminal, label: 'System', desc: 'Logs, config & sources' },
-            { id: 'settings', icon: Settings, label: 'Settings', desc: 'Connection & logout' },
-        ],
-    },
-];
-
-const allItems = menuSections.flatMap(s => s.items);
-
-const primaryTabs = [
-    { id: 'dashboard', icon: Home, label: 'Home' },
-    { id: 'briefings', icon: FileText, label: 'Brief' },
-    { id: 'regime', icon: Radar, label: 'Regime' },
-    { id: 'flows', icon: GitBranch, label: 'Flows' },
-    { id: 'viz-dashboard', icon: Activity, label: 'Intel' },
-    { id: 'discovery', icon: FlaskConical, label: 'Discover' },
-    { id: 'menu', icon: Menu, label: 'More' },
-];
+import { Menu, X, ChevronRight } from 'lucide-react';
+import { NAV_SECTIONS, PRIMARY_TABS, PRIMARY_IDS } from '../config/routes.js';
 
 const styles = {
     nav: {
@@ -142,8 +78,6 @@ const styles = {
     },
 };
 
-const isPrimaryView = (view) => ['dashboard', 'briefings', 'regime', 'flows', 'viz-dashboard', 'discovery'].includes(view);
-
 export default function NavBar({ activeView, onNavigate }) {
     const [showMenu, setShowMenu] = useState(false);
 
@@ -156,7 +90,7 @@ export default function NavBar({ activeView, onNavigate }) {
         onNavigate(id);
     };
 
-    const isSecondaryView = !isPrimaryView(activeView) && activeView !== 'journal-entry';
+    const isSecondaryView = !PRIMARY_IDS.has(activeView) && activeView !== 'journal-entry';
 
     return (
         <>
@@ -174,7 +108,7 @@ export default function NavBar({ activeView, onNavigate }) {
                                 <X size={20} color="#5A7080" />
                             </button>
                         </div>
-                        {menuSections.map(section => (
+                        {NAV_SECTIONS.map(section => (
                             <div key={section.label}>
                                 <div style={styles.sectionLabel}>{section.label}</div>
                                 {section.items.map(item => {
@@ -220,12 +154,9 @@ export default function NavBar({ activeView, onNavigate }) {
             )}
             <nav style={styles.nav}>
                 <div style={styles.primaryRow}>
-                    {primaryTabs.map(tab => {
+                    {PRIMARY_TABS.map(tab => {
                         const Icon = tab.icon;
-                        const isMenu = tab.id === 'menu';
-                        const isActive = isMenu
-                            ? (showMenu || isSecondaryView)
-                            : activeView === tab.id;
+                        const isActive = activeView === tab.id;
                         return (
                             <button
                                 key={tab.id}
@@ -244,6 +175,20 @@ export default function NavBar({ activeView, onNavigate }) {
                             </button>
                         );
                     })}
+                    <button
+                        onClick={() => handleNav('menu')}
+                        style={styles.tab}
+                        aria-label="More"
+                    >
+                        <Menu
+                            size={22}
+                            color={(showMenu || isSecondaryView) ? '#1A6EBF' : '#5A7080'}
+                        />
+                        <span style={{
+                            ...styles.label,
+                            color: (showMenu || isSecondaryView) ? '#1A6EBF' : '#5A7080',
+                        }}>More</span>
+                    </button>
                 </div>
             </nav>
         </>

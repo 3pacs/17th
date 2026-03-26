@@ -1,39 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
 import { createRoot } from 'react-dom/client';
 import useStore from './store.js';
 import { api } from './api.js';
 import NavBar from './components/NavBar.jsx';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
-import Login from './views/Login.jsx';
-import Dashboard from './views/Dashboard.jsx';
-import Regime from './views/Regime.jsx';
-import Signals from './views/Signals.jsx';
-import Journal from './views/Journal.jsx';
-import JournalEntry from './views/JournalEntry.jsx';
-import Models from './views/Models.jsx';
-import Discovery from './views/Discovery.jsx';
-import Hyperspace from './views/Hyperspace.jsx';
-import Agents from './views/Agents.jsx';
-import Briefings from './views/Briefings.jsx';
-import Workflows from './views/Workflows.jsx';
-import Physics from './views/Physics.jsx';
-import SystemLogs from './views/SystemLogs.jsx';
-import Backtest from './views/Backtest.jsx';
-import Associations from './views/Associations.jsx';
-import AssociationsLegacy from './views/AssociationsLegacy.jsx';
-import Settings from './views/Settings.jsx';
-import Strategy from './views/Strategy.jsx';
-import Options from './views/Options.jsx';
-import Derivatives from './views/Derivatives.jsx';
-import Heatmap from './views/Heatmap.jsx';
-import Flows from './views/Flows.jsx';
-import WeightSliders from './views/WeightSliders.jsx';
-import Knowledge from './views/Knowledge.jsx';
-import WatchlistAnalysis from './views/WatchlistAnalysis.jsx';
-import Operator from './views/Operator.jsx';
-import Snapshots from './views/Snapshots.jsx';
-import VizDashboard from './views/VizDashboard.jsx';
-import HermesInbox from './views/HermesInbox.jsx';
+import { ROUTE_MAP, DEFAULT_ROUTE, Login } from './config/routes.js';
 
 const styles = {
     app: {
@@ -69,6 +40,15 @@ const styles = {
         animation: 'slideDown 0.3s ease',
         pointerEvents: 'auto',
         boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
+    },
+    suspenseFallback: {
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        height: '60vh',
+        color: '#5A7080',
+        fontFamily: "'IBM Plex Sans', sans-serif",
+        fontSize: '14px',
     },
 };
 
@@ -110,41 +90,31 @@ function App() {
     };
 
     if (!isAuthenticated) {
-        return <Login />;
+        return (
+            <Suspense fallback={<div style={styles.suspenseFallback}>Loading...</div>}>
+                <Login />
+            </Suspense>
+        );
     }
 
     const renderView = () => {
+        const route = ROUTE_MAP[activeView];
+        const View = route ? route.component : DEFAULT_ROUTE.component;
+
+        // Views that need special props
         switch (activeView) {
-            case 'dashboard': return <Dashboard onNavigate={navigate} />;
-            case 'regime': return <Regime />;
-            case 'strategy': return <Strategy />;
-            case 'signals': return <Signals />;
-            case 'journal': return <Journal onNavigate={navigate} />;
-            case 'journal-entry': return <JournalEntry entryId={entryId} onBack={() => navigate('journal')} />;
-            case 'models': return <Models />;
-            case 'discovery': return <Discovery />;
-            case 'associations': return <Associations onNavigate={(v) => window.location.hash = `#/${v}`} />;
-            case 'associations-legacy': return <AssociationsLegacy />;
-            case 'agents': return <Agents />;
-            case 'briefings': return <Briefings />;
-            case 'workflows': return <Workflows />;
-            case 'physics': return <Physics />;
-            case 'system': return <SystemLogs />;
-            case 'backtest': return <Backtest />;
-            case 'options': return <Options />;
-            case 'derivatives': return <Derivatives />;
-            case 'heatmap': return <Heatmap />;
-            case 'flows': return <Flows />;
-            case 'weights': return <WeightSliders />;
-            case 'hyperspace': return <Hyperspace />;
-            case 'knowledge': return <Knowledge />;
-            case 'watchlist': return <WatchlistAnalysis />;
-            case 'operator': return <Operator />;
-            case 'snapshots': return <Snapshots />;
-            case 'viz-dashboard': return <VizDashboard />;
-            case 'hermes-inbox': return <HermesInbox />;
-            case 'settings': return <Settings onLogout={() => { clearAuth(); }} />;
-            default: return <Dashboard onNavigate={navigate} />;
+            case 'dashboard':
+                return <View onNavigate={navigate} />;
+            case 'journal':
+                return <View onNavigate={navigate} />;
+            case 'journal-entry':
+                return <View entryId={entryId} onBack={() => navigate('journal')} />;
+            case 'associations':
+                return <View onNavigate={(v) => window.location.hash = `#/${v}`} />;
+            case 'settings':
+                return <View onLogout={() => { clearAuth(); }} />;
+            default:
+                return <View />;
         }
     };
 
@@ -174,7 +144,9 @@ function App() {
             </div>
             <div style={styles.content}>
                 <ErrorBoundary key={activeView}>
-                    {renderView()}
+                    <Suspense fallback={<div style={styles.suspenseFallback}>Loading...</div>}>
+                        {renderView()}
+                    </Suspense>
                 </ErrorBoundary>
             </div>
             <NavBar activeView={activeView} onNavigate={navigate} />
