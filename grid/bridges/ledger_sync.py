@@ -1,5 +1,12 @@
 """Bridge: GRID Core → grid_app DuckDB ledger.
 
+ARCHITECTURE NOTE:
+    DuckDB (grid_app) is a READ-ONLY DISPLAY MIRROR of Postgres (GRID Core).
+    Postgres hypothesis_registry is the source of truth for all hypothesis state.
+    DuckDB hypothesis_registry contains 19 static seed hypotheses for display.
+    This bridge syncs calibration events and regime state Postgres → DuckDB.
+    Data flows ONE DIRECTION ONLY: Postgres → DuckDB. Never the reverse.
+
 Pushes regime state and hypothesis calibration events from the Postgres-backed
 GRID core into the DuckDB-backed grid_app ledger so the flywheel feedback loop
 actually closes.
