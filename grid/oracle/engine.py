@@ -566,7 +566,8 @@ class OracleEngine:
         """
         today = date.today()
         scored = 0
-        results = {"hits": 0, "misses": 0, "partials": 0, "total": 0}
+        no_data_count = 0
+        results = {"hits": 0, "misses": 0, "partials": 0, "no_data": 0, "total": 0}
 
         with self.engine.begin() as conn:
             # Get pending predictions past expiry
@@ -584,6 +585,23 @@ class OracleEngine:
                 # Get actual price at expiry
                 actual = self._get_price_at_date(ticker, expiry)
                 if actual is None:
+                    # If expiry + 3 days has passed and still no price, mark as no_data
+                    if today >= expiry + timedelta(days=3):
+                        conn.execute(text("""
+                            UPDATE oracle_predictions
+                            SET verdict = 'no_data',
+                                scored_at = NOW(),
+                                score_notes = :notes
+                            WHERE id = :id
+                        """), {
+                            "id": pred_id,
+                            "notes": f"No price data for {ticker} at expiry {expiry} (checked {today})",
+                        })
+                        no_data_count += 1
+                        log.warning(
+                            "Oracle prediction #{id}: no price data for {tk} at expiry {exp}",
+                            id=pred_id, tk=ticker, exp=expiry,
+                        )
                     continue
 
                 actual_move = (actual - entry) / entry * 100
@@ -635,8 +653,10 @@ class OracleEngine:
                 scored += 1
 
         results["total"] = scored
-        log.info("Scored {n} predictions: {h}H/{p}P/{m}M",
-                 n=scored, h=results["hits"], p=results["partials"], m=results["misses"])
+        results["no_data"] = no_data_count
+        log.info("Scored {n} predictions: {h}H/{p}P/{m}M, {nd} no_data",
+                 n=scored, h=results["hits"], p=results["partials"],
+                 m=results["misses"], nd=no_data_count)
 
         return results
 

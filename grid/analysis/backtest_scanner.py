@@ -182,7 +182,7 @@ def generate_hypotheses_from_winners(
                 "INSERT INTO hypothesis_registry "
                 "(statement, layer, lag_structure, state, feature_ids, "
                 "proposed_metric, proposed_threshold) "
-                "VALUES (:s, 'TACTICAL', :lag, 'PASSED', ARRAY[]::int[], "
+                "VALUES (:s, 'TACTICAL', :lag, 'CANDIDATE', ARRAY[]::int[], "
                 "'lagged_correlation', 0.5)"
             ), {"s": stmt, "lag": lag})
             created += 1

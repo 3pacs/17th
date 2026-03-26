@@ -168,6 +168,27 @@ def execute_signals(engine: Engine) -> dict:
                     )
 
                     if trade_id > 0:
+                        # Store the signal threshold active at trade open time
+                        try:
+                            conn.execute(text(
+                                "UPDATE paper_trades SET signal_threshold = :thr "
+                                "WHERE id = :tid"
+                            ), {"thr": _SIGNAL_THRESHOLD, "tid": trade_id})
+                        except Exception:
+                            # Column may not exist yet — add it then retry
+                            conn.execute(text(
+                                "ALTER TABLE paper_trades "
+                                "ADD COLUMN IF NOT EXISTS signal_threshold FLOAT DEFAULT 0.01"
+                            ))
+                            conn.execute(text(
+                                "UPDATE paper_trades SET signal_threshold = :thr "
+                                "WHERE id = :tid"
+                            ), {"thr": _SIGNAL_THRESHOLD, "tid": trade_id})
+                        log.info(
+                            "Trade #{tid} opened with signal_threshold={thr}",
+                            tid=trade_id, thr=_SIGNAL_THRESHOLD,
+                        )
+
                         trades_opened += 1
                         details.append({
                             "action": "OPEN",
@@ -179,6 +200,7 @@ def execute_signals(engine: Engine) -> dict:
                             "position_size": round(position_size, 4),
                             "signal_strength": round(signal_strength, 4),
                             "leader_return": round(leader_return, 4),
+                            "signal_threshold": _SIGNAL_THRESHOLD,
                         })
 
                 # ----------------------------------------------------------

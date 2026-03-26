@@ -481,10 +481,24 @@ async def websocket_endpoint(
         log.info("WebSocket client disconnected (total={n})", n=len(_ws_clients))
 
 
-# Serve DerivativesGrid static files
+# Serve DerivativesGrid SPA — static assets + index.html fallback for client-side routing
 _derivatives_dist = Path(__file__).parent.parent / "derivatives_dist"
 if _derivatives_dist.exists():
-    app.mount("/derivatives", StaticFiles(directory=str(_derivatives_dist), html=True), name="derivatives")
+    app.mount(
+        "/derivatives/assets",
+        StaticFiles(directory=str(_derivatives_dist / "assets")),
+        name="derivatives-assets",
+    )
+
+    @app.get("/derivatives/{full_path:path}")
+    async def serve_derivatives_spa(full_path: str) -> FileResponse:
+        """Serve DerivativesGrid SPA — return index.html for all sub-paths (client-side routing)."""
+        return FileResponse(str(_derivatives_dist / "index.html"))
+
+    @app.get("/derivatives")
+    async def serve_derivatives_root() -> FileResponse:
+        """Serve DerivativesGrid SPA root (without trailing slash)."""
+        return FileResponse(str(_derivatives_dist / "index.html"))
 
 # Serve AstroGrid static files
 _astrogrid_dist = Path(__file__).parent.parent / "astrogrid_dist"

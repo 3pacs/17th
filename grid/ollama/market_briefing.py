@@ -207,13 +207,34 @@ class MarketBriefingEngine:
         if features:
             try:
                 from analysis.prompt_optimizer import select_prompt_features, format_features_for_prompt
+                from sqlalchemy import text as _text
 
-                # Build feature dicts with z-scores (use value as proxy if z not available)
-                feat_list = [
-                    {"name": name, "z": info["value"], "value": info["value"]}
-                    for name, info in features.items()
-                    if info.get("value") is not None
-                ]
+                # Compute real z-scores from 252-day resolved_series window
+                feat_list: list[dict] = []
+                if self.engine is not None:
+                    with self.engine.connect() as _conn:
+                        for name, info in features.items():
+                            if info.get("value") is None:
+                                continue
+                            row = _conn.execute(_text(
+                                "SELECT AVG(rs.value), STDDEV(rs.value) "
+                                "FROM resolved_series rs "
+                                "JOIN feature_registry fr ON fr.id = rs.feature_id "
+                                "WHERE fr.name = :fname "
+                                "AND rs.obs_date >= CURRENT_DATE - INTERVAL '252 days'"
+                            ), {"fname": name}).fetchone()
+                            mean, std = (row[0], row[1]) if row else (None, None)
+                            if mean is not None and std is not None and std > 0:
+                                z = (info["value"] - float(mean)) / float(std)
+                            else:
+                                z = 0.0
+                            feat_list.append({"name": name, "z": round(z, 4), "value": info["value"]})
+                else:
+                    feat_list = [
+                        {"name": name, "z": 0.0, "value": info["value"]}
+                        for name, info in features.items()
+                        if info.get("value") is not None
+                    ]
                 selected = select_prompt_features(feat_list, max_count=20, corr_threshold=0.7)
                 lines.append(f"### GRID FEATURES ({len(features)} total, {len(selected)} selected by orthogonality)")
                 lines.append(format_features_for_prompt(selected, include_value=True))
