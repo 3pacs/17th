@@ -50,6 +50,8 @@ from loguru import logger as log
 
 CYCLE_INTERVAL_SECONDS = 300          # 5 minutes between cycles
 PIPELINE_INTERVAL_HOURS = 6           # run full pipeline every 6 hours
+DATA_QUALITY_INTERVAL_HOURS = 6       # check feature coverage every 6 hours
+DATA_QUALITY_COVERAGE_THRESHOLD = 0.80  # flag families below 80% coverage
 DATA_FRESHNESS_THRESHOLD_HOURS = 26   # flag stale sources after 26h
 MAX_PULL_RETRIES = 3                  # retry failed pulls up to 3 times
 AUTORESEARCH_MAX_ITER = 5             # hypothesis iterations per cycle
@@ -352,6 +354,7 @@ class OperatorState:
         self.last_hypothesis_test: datetime | None = None
         self.last_backtest_scan: datetime | None = None
         self.last_email_check: datetime | None = None
+        self.last_data_quality_check: datetime | None = None
         self.consecutive_failures: int = 0
         self.cycle_count: int = 0
         self.fixes_applied: int = 0
@@ -1035,6 +1038,182 @@ def maybe_run_autoresearch(state: OperatorState, dry_run: bool = False) -> dict[
         return {"error": str(exc)}
 
 
+# ─── Data quality checker ─────────────────────────────────────────────
+
+def check_and_fix_data_quality(
+    engine: Any,
+    state: OperatorState,
+    dry_run: bool = False,
+) -> dict[str, Any] | None:
+    """Check feature coverage per family and run resolver if below threshold.
+
+    Every DATA_QUALITY_INTERVAL_HOURS, queries feature_registry to find
+    families where < DATA_QUALITY_COVERAGE_THRESHOLD of model-eligible
+    features have at least one row in resolved_series.  If underpopulated
+    families are found, runs the Resolver to promote any pending raw_series
+    rows.  If coverage is still below threshold after resolution, logs an
+    operator_issue so the operator knows manual intervention is needed.
+
+    Returns:
+        dict with coverage stats and actions taken, or None if skipped
+        (not yet due).
+    """
+    from sqlalchemy import text as sa_text
+
+    now = datetime.now(timezone.utc)
+
+    # Respect the interval
+    if state.last_data_quality_check is not None:
+        hours_since = (now - state.last_data_quality_check).total_seconds() / 3600
+        if hours_since < DATA_QUALITY_INTERVAL_HOURS:
+            return None
+
+    log.info("FIX_DATA_QUALITY — checking feature coverage per family")
+    result: dict[str, Any] = {"checked_at": now.isoformat(), "families": {}}
+
+    try:
+        # Step 1: Check coverage per family
+        coverage_query = sa_text("""
+            SELECT fr.family,
+                   COUNT(*) FILTER (WHERE fr.model_eligible) AS total,
+                   COUNT(*) FILTER (WHERE fr.model_eligible AND fr.id IN (
+                       SELECT DISTINCT feature_id FROM resolved_series
+                   )) AS populated
+            FROM feature_registry fr
+            GROUP BY fr.family
+        """)
+
+        with engine.connect() as conn:
+            rows = conn.execute(coverage_query).fetchall()
+
+        underpopulated: list[dict[str, Any]] = []
+        for row in rows:
+            family, total, populated = row[0], row[1], row[2]
+            if total == 0:
+                continue
+            coverage = populated / total
+            family_info = {
+                "family": family,
+                "total": total,
+                "populated": populated,
+                "coverage": round(coverage, 4),
+            }
+            result["families"][family] = family_info
+            if coverage < DATA_QUALITY_COVERAGE_THRESHOLD:
+                underpopulated.append(family_info)
+                log.warning(
+                    "FIX_DATA_QUALITY — family '{f}' underpopulated: "
+                    "{p}/{t} ({c:.1%} < {thresh:.0%})",
+                    f=family, p=populated, t=total,
+                    c=coverage, thresh=DATA_QUALITY_COVERAGE_THRESHOLD,
+                )
+
+        result["underpopulated_families"] = len(underpopulated)
+
+        if not underpopulated:
+            log.info("FIX_DATA_QUALITY — all families meet coverage threshold")
+            state.last_data_quality_check = now
+            result["action"] = "none_needed"
+            return result
+
+        # Step 2: Run the resolver to promote pending raw_series rows
+        if dry_run:
+            log.info("FIX_DATA_QUALITY — [DRY RUN] would run resolver for {n} underpopulated families",
+                     n=len(underpopulated))
+            state.last_data_quality_check = now
+            result["action"] = "dry_run"
+            return result
+
+        log.info("FIX_DATA_QUALITY — running resolver to promote pending observations")
+        resolver_result: dict[str, int] = {"resolved": 0, "conflicts_found": 0, "errors": 0}
+        try:
+            from normalization.resolver import Resolver
+            resolver = Resolver(db_engine=engine)
+            resolver_result = resolver.resolve_pending()
+            result["resolver"] = resolver_result
+            log.info(
+                "FIX_DATA_QUALITY — resolver finished: resolved={r}, conflicts={c}, errors={e}",
+                r=resolver_result["resolved"],
+                c=resolver_result["conflicts_found"],
+                e=resolver_result["errors"],
+            )
+        except Exception as exc:
+            log.error("FIX_DATA_QUALITY — resolver failed: {e}", e=str(exc))
+            result["resolver"] = {"error": str(exc)}
+            # Log failure but continue to check if coverage improved anyway
+            log_issue(
+                engine, category="data_quality", severity="WARNING",
+                title="Resolver failed during data quality check",
+                detail=str(exc),
+                stack_trace=traceback.format_exc(),
+                fix_applied="resolve_pending()",
+                fix_result="FAILED",
+                cycle_number=state.cycle_count,
+            )
+
+        # Step 3: Re-check coverage to see if resolver helped
+        still_under: list[dict[str, Any]] = []
+        try:
+            with engine.connect() as conn:
+                rows_after = conn.execute(coverage_query).fetchall()
+            for row in rows_after:
+                family, total, populated = row[0], row[1], row[2]
+                if total == 0:
+                    continue
+                coverage = populated / total
+                if coverage < DATA_QUALITY_COVERAGE_THRESHOLD:
+                    missing = total - populated
+                    still_under.append({
+                        "family": family,
+                        "total": total,
+                        "populated": populated,
+                        "missing": missing,
+                        "coverage": round(coverage, 4),
+                    })
+        except Exception as exc:
+            log.warning("FIX_DATA_QUALITY — post-resolver coverage check failed: {e}", e=str(exc))
+
+        result["still_underpopulated"] = len(still_under)
+
+        if still_under:
+            # Resolver didn't fully fix it — log an operator issue
+            families_detail = "; ".join(
+                f"{f['family']}: {f['populated']}/{f['total']} ({f['coverage']:.0%}, {f['missing']} missing)"
+                for f in still_under
+            )
+            log.warning(
+                "FIX_DATA_QUALITY — {n} families still below threshold after resolver: {d}",
+                n=len(still_under), d=families_detail,
+            )
+            log_issue(
+                engine, category="data_quality", severity="WARNING",
+                title=f"Feature coverage below {DATA_QUALITY_COVERAGE_THRESHOLD:.0%} in {len(still_under)} families",
+                detail=(
+                    f"Underpopulated families after resolver run:\n{families_detail}\n\n"
+                    f"Resolver result: resolved={resolver_result.get('resolved', 0)}, "
+                    f"conflicts={resolver_result.get('conflicts_found', 0)}, "
+                    f"errors={resolver_result.get('errors', 0)}"
+                ),
+                fix_applied="resolve_pending()",
+                fix_result="FAILED",
+                cycle_number=state.cycle_count,
+            )
+            result["action"] = "resolver_insufficient"
+        else:
+            log.info("FIX_DATA_QUALITY — all families now meet coverage threshold after resolver")
+            result["action"] = "resolver_fixed"
+
+        state.last_data_quality_check = now
+
+    except Exception as exc:
+        log.error("FIX_DATA_QUALITY — unexpected error: {e}", e=str(exc))
+        result["error"] = str(exc)
+        # Still update the timestamp to avoid retrying every cycle on persistent errors
+        state.last_data_quality_check = now
+
+    return result
+
+
 # ─── Snapshot persistence ────────────────────────────────────────────
 
 def save_cycle_snapshot(engine: Any, cycle_result: dict[str, Any]) -> None:
@@ -1175,6 +1354,14 @@ def run_cycle(state: OperatorState, dry_run: bool = False) -> dict[str, Any]:
         cycle_result["data_gaps"] = gap_result
     except Exception as exc:
         log.warning("Gap filler failed: {e}", e=str(exc))
+
+    # 4b. FIX_DATA_QUALITY — check feature coverage, run resolver if needed
+    try:
+        dq_result = check_and_fix_data_quality(engine, state, dry_run=dry_run)
+        if dq_result is not None:
+            cycle_result["data_quality"] = dq_result
+    except Exception as exc:
+        log.warning("Data quality check failed: {e}", e=str(exc))
 
     # 5. Self-diagnostics + active remediation (Hermes executes fixes)
     try:

@@ -82,3 +82,34 @@ class FamilyFreshness(BaseModel):
 class FreshnessResponse(BaseModel):
     families: list[FamilyFreshness]
     overall_status: str  # GREEN, YELLOW, RED
+
+
+class SubsystemInfo(BaseModel):
+    name: str
+    interval: str
+    last_run: str | None = None
+    status: str = "stale"  # healthy, stale, error
+    last_result: str | None = None
+
+
+class EmailInboxStats(BaseModel):
+    total: int = 0
+    pending: int = 0
+    processed: int = 0
+    spam: int = 0
+    last_check: str | None = None
+
+
+class RecentIssue(BaseModel):
+    title: str
+    severity: str
+    created_at: str | None = None
+    fix_result: str | None = None
+
+
+class SubsystemHealthResponse(BaseModel):
+    subsystems: list[SubsystemInfo] = []
+    email_inbox: EmailInboxStats = EmailInboxStats()
+    sync_failures: int = 0
+    operator_issues_24h: int = 0
+    recent_issues: list[RecentIssue] = []

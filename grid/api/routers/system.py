@@ -14,14 +14,18 @@ from api.auth import require_auth, require_role
 from api.dependencies import get_db_engine
 from api.schemas.system import (
     DatabaseStatus,
+    EmailInboxStats,
     FamilyFreshness,
     FreshnessResponse,
     GridStats,
     HealthResponse,
     HyperspaceStatus,
     LogsResponse,
+    RecentIssue,
     RestartResponse,
     ServerHealth,
+    SubsystemHealthResponse,
+    SubsystemInfo,
     SystemStatusResponse,
 )
 
@@ -495,6 +499,193 @@ async def restart_hyperspace(
         return RestartResponse(status="restarting", message="Hyperspace node restarting")
     except Exception as exc:
         return RestartResponse(status="error", message=str(exc))
+
+
+# ── Subsystem Health endpoint ──────────────────────────────────
+
+# Subsystem definitions: (name, interval_label, interval_seconds, snapshot_key)
+_SUBSYSTEMS = [
+    ("Market Briefing",       "1h",      3600,     "pipeline"),
+    ("Paper Trading Signals", "1h",      3600,     "pipeline"),
+    ("Capital Flow Research", "4h",      14400,    "pipeline"),
+    ("100x Digest",           "4h",      14400,    "100x_digest"),
+    ("Oracle Cycle",          "6h",      21600,    "oracle"),
+    ("Hypothesis Testing",    "12h",     43200,    "hypothesis_testing"),
+    ("Backtest Scanner",      "weekly",  604800,   "backtest_scanner"),
+    ("Email Check",           "15min",   900,      "email_ingest"),
+    ("UX Audit",              "6h",      21600,    "ux_audit"),
+]
+
+
+def _subsystem_result_summary(key: str, payload: dict) -> str | None:
+    """Extract a human-readable result snippet from the cycle payload."""
+    data = payload.get(key)
+    if data is None:
+        return None
+    if isinstance(data, dict):
+        if key == "hypothesis_testing":
+            tested = data.get("tested", 0)
+            passed = data.get("passed", 0)
+            return f"{tested} tested, {passed} passed"
+        if key == "backtest_scanner":
+            w = data.get("winners", 0)
+            h = data.get("hypotheses_created", 0)
+            return f"{w} winners, {h} hypotheses created"
+        if key == "oracle":
+            np_ = data.get("new_predictions", 0)
+            sc = data.get("scored", 0)
+            return f"{np_} predictions, {sc} scored"
+        if key == "100x_digest":
+            opps = data.get("opportunities", data.get("count", "?"))
+            return f"{opps} opportunities found"
+        if key == "ux_audit":
+            score = data.get("score", "?")
+            return f"Score: {score}"
+        if key == "email_ingest":
+            nm = data.get("new_messages", 0)
+            return f"{nm} new messages"
+        if key == "pipeline":
+            return "Pipeline completed"
+        if "error" in data:
+            return f"Error: {str(data['error'])[:80]}"
+    return str(data)[:100] if data else None
+
+
+@router.get("/subsystem-health", response_model=SubsystemHealthResponse)
+async def subsystem_health(
+    _token: str = Depends(require_auth),
+) -> SubsystemHealthResponse:
+    """Subsystem health overview for the Operator view.
+
+    Returns status of each Hermes subsystem, email inbox stats,
+    sync failure count, and recent operator issues.
+    """
+    engine = get_db_engine()
+    now = datetime.now(timezone.utc)
+
+    # -- 1. Get latest pipeline_summary snapshot for last-run data --
+    latest_payload: dict = {}
+    latest_created: datetime | None = None
+    try:
+        with engine.connect() as conn:
+            row = conn.execute(text(
+                "SELECT payload, created_at FROM analytical_snapshots "
+                "WHERE category = 'pipeline_summary' "
+                "ORDER BY created_at DESC LIMIT 1"
+            )).fetchone()
+            if row:
+                import json as _json
+                raw = row[0]
+                latest_payload = raw if isinstance(raw, dict) else _json.loads(raw)
+                latest_created = row[1]
+    except Exception as exc:
+        log.warning("subsystem-health: snapshot query failed: {e}", e=str(exc))
+
+    # -- 2. Build subsystem list --
+    subsystems: list[SubsystemInfo] = []
+    for name, interval_label, interval_secs, snap_key in _SUBSYSTEMS:
+        last_run: str | None = None
+        status = "stale"
+        last_result: str | None = None
+
+        # Determine last_run from the snapshot created_at if the key exists
+        if latest_payload.get(snap_key) is not None and latest_created is not None:
+            last_run = latest_created.isoformat() if latest_created else None
+            last_result = _subsystem_result_summary(snap_key, latest_payload)
+
+            # Check for error in the subsystem data
+            sub_data = latest_payload.get(snap_key, {})
+            has_error = isinstance(sub_data, dict) and "error" in sub_data
+
+            if has_error:
+                status = "error"
+            elif last_run:
+                age = (now - latest_created).total_seconds()
+                # Stale if last run is older than 2x interval
+                if age > interval_secs * 2:
+                    status = "stale"
+                else:
+                    status = "healthy"
+        else:
+            status = "stale"
+
+        subsystems.append(SubsystemInfo(
+            name=name,
+            interval=interval_label,
+            last_run=last_run,
+            status=status,
+            last_result=last_result,
+        ))
+
+    # -- 3. Email inbox stats --
+    email_stats = EmailInboxStats()
+    try:
+        with engine.connect() as conn:
+            row = conn.execute(text(
+                "SELECT "
+                "  COUNT(*) AS total, "
+                "  COUNT(*) FILTER (WHERE status = 'pending') AS pending, "
+                "  COUNT(*) FILTER (WHERE status = 'processed') AS processed, "
+                "  COUNT(*) FILTER (WHERE status = 'spam') AS spam, "
+                "  MAX(received_at) AS last_check "
+                "FROM hermes_inbox"
+            )).fetchone()
+            if row:
+                email_stats = EmailInboxStats(
+                    total=row[0] or 0,
+                    pending=row[1] or 0,
+                    processed=row[2] or 0,
+                    spam=row[3] or 0,
+                    last_check=row[4].isoformat() if row[4] else None,
+                )
+    except Exception as exc:
+        log.debug("subsystem-health: hermes_inbox query failed: {e}", e=str(exc))
+
+    # -- 4. Sync failures (DuckDB — best effort) --
+    sync_fail_count = 0
+    try:
+        from bridges.ledger_sync import get_sync_failures
+        failures = get_sync_failures(limit=1000)
+        sync_fail_count = len(failures)
+    except Exception:
+        pass
+
+    # -- 5. Operator issues (last 24h) --
+    issues_24h = 0
+    recent_issues: list[RecentIssue] = []
+    try:
+        with engine.connect() as conn:
+            row = conn.execute(text(
+                "SELECT COUNT(*) FROM operator_issues "
+                "WHERE created_at > NOW() - INTERVAL '24 hours'"
+            )).fetchone()
+            issues_24h = row[0] if row else 0
+
+            rows = conn.execute(text(
+                "SELECT title, severity, created_at, fix_result "
+                "FROM operator_issues "
+                "WHERE created_at > NOW() - INTERVAL '24 hours' "
+                "ORDER BY created_at DESC LIMIT 20"
+            )).fetchall()
+            recent_issues = [
+                RecentIssue(
+                    title=r[0],
+                    severity=r[1],
+                    created_at=r[2].isoformat() if r[2] else None,
+                    fix_result=r[3],
+                )
+                for r in rows
+            ]
+    except Exception as exc:
+        log.debug("subsystem-health: operator_issues query failed: {e}", e=str(exc))
+
+    return SubsystemHealthResponse(
+        subsystems=subsystems,
+        email_inbox=email_stats,
+        sync_failures=sync_fail_count,
+        operator_issues_24h=issues_24h,
+        recent_issues=recent_issues,
+    )
 
 
 # ── UX Audit endpoints ─────────────────────────────────────────

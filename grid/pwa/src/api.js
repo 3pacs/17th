@@ -110,6 +110,7 @@ class GRIDApi {
 
     // System
     async getStatus() { return this._fetch('/api/v1/system/status'); }
+    async getSubsystemHealth() { return this._fetch('/api/v1/system/subsystem-health'); }
     async getLogs(source = 'api', lines = 50) {
         return this._fetch(`/api/v1/system/logs?source=${source}&lines=${lines}`);
     }
