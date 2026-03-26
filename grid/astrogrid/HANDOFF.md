@@ -11,8 +11,8 @@ This file is the branch-local work journal for AstroGrid. Use it to understand c
 
 - AstroGrid scaffold has been expanded into a multi-view frontend with a working Orrery, lunar surfaces, correlations heatmap, timeline, ephemeris, narrative, and settings
 - A production-oriented frontend commit already exists on this branch: `50b68b9`
-- The branch is currently ahead of `origin/codex/astrogrid-prototype`
-- A larger integrated AstroGrid hardening pass is now present in the worktree but not yet committed
+- The latest integrated hardening pass is committed as `dc82a2e`
+- `codex/astrogrid-prototype` has been pushed to `origin`
 - `npm.cmd run build` succeeded on 2026-03-26 after the latest integration pass
 
 ## Important Constraints
@@ -101,14 +101,11 @@ Files changed in the current uncommitted hardening pass:
 
 Open follow-through:
 
-- Commit only the AstroGrid source and doc files; do not commit `grid/astrogrid_dist/`
-- Push `codex/astrogrid-prototype`
 - Relay standardized AstroGrid endpoint requests through the operator if we want to move more views from fallback into full live mode
 - Start Phase 2 deliverables from the roadmap: pricing, paid-beta narrative, and demo collateral
 
 Next recommended step:
 
-- `git add grid/astrogrid`
-- create one commit for the production-hardening pass
-- push `codex/astrogrid-prototype`
-- then start the paid-beta packaging work described in `ROADMAP-Q2-2026.md`
+- Start the paid-beta packaging work described in `ROADMAP-Q2-2026.md`
+- Prepare operator-facing pricing, positioning, and demo collateral
+- Relay endpoint standardization asks through the operator for the remaining hybrid views
