@@ -50,16 +50,58 @@ const ephStyles = {
 
 function normalizeApiEphemeris(data) {
     if (!data) return null;
-    if (Array.isArray(data.planets)) return data;
 
-    if (data.ephemeris) {
-        return {
-            date: data.date,
-            ephemeris: data.ephemeris,
-        };
+    const root = data.ephemeris || data;
+    const rawPlanets = Array.isArray(root.planets)
+        ? root.planets
+        : Array.isArray(root.positions)
+            ? root.positions
+            : Array.isArray(root.bodies)
+                ? root.bodies
+                : [];
+    const rawAspects = Array.isArray(root.aspects) ? root.aspects : [];
+
+    const planets = rawPlanets
+        .map((planet, index) => ({
+            planet: planet.planet || planet.name || planet.body || `Body ${index + 1}`,
+            geocentric_longitude: Number(
+                planet.geocentric_longitude
+                ?? planet.longitude
+                ?? planet.lon
+                ?? planet.position
+                ?? 0
+            ),
+            right_ascension: Number(planet.right_ascension ?? planet.ra ?? planet.ascension ?? 0),
+            zodiac_sign: planet.zodiac_sign || planet.sign || 'Unknown',
+            zodiac_degree: Number(planet.zodiac_degree ?? planet.degree ?? planet.sign_degree ?? 0),
+            is_retrograde: Boolean(
+                planet.is_retrograde
+                ?? planet.retrograde
+                ?? planet.rx
+            ),
+        }))
+        .filter((planet) => Number.isFinite(planet.geocentric_longitude));
+
+    const aspects = rawAspects
+        .map((aspect, index) => ({
+            planet1: aspect.planet1 || aspect.from || aspect.body1 || `Body ${index + 1}`,
+            planet2: aspect.planet2 || aspect.to || aspect.body2 || 'Body',
+            aspect_type: aspect.aspect_type || aspect.type || 'aspect',
+            nature: aspect.nature || aspect.tone || 'variable',
+            applying: Boolean(aspect.applying ?? false),
+            orb_used: Number(aspect.orb_used ?? aspect.orb ?? aspect.distance ?? 0),
+        }))
+        .filter((aspect) => aspect.planet1 && aspect.planet2);
+
+    if (!planets.length && !aspects.length) {
+        return null;
     }
 
-    return null;
+    return {
+        date: root.date || data.date || null,
+        planets,
+        aspects,
+    };
 }
 
 export default function Ephemeris() {
@@ -94,8 +136,11 @@ export default function Ephemeris() {
         };
     }, [selectedDate]);
 
-    const positions = Object.values(localData.positions);
-    const aspects = localData.aspects.slice(0, 8);
+    const positions = apiData?.planets?.length ? apiData.planets : Object.values(localData.positions);
+    const aspects = apiData?.aspects?.length ? apiData.aspects.slice(0, 8) : localData.aspects.slice(0, 8);
+    const sourceLabel = apiData?.planets?.length || apiData?.aspects?.length
+        ? 'Live ephemeris payload'
+        : 'Deterministic local ephemeris';
 
     return (
         <div style={styles.container}>
@@ -137,9 +182,14 @@ export default function Ephemeris() {
                 </div>
 
                 <div style={styles.card}>
-                    <div style={styles.subheader}>API Status</div>
+                    <div style={styles.subheader}>Data Source</div>
                     <div style={styles.value}>
-                        {apiData ? 'AstroGrid ephemeris endpoint responded.' : 'Using deterministic local ephemeris fallback.'}
+                        {sourceLabel}
+                    </div>
+                    <div style={{ ...styles.label, marginTop: tokens.spacing.sm }}>
+                        {apiData
+                            ? 'The table below is using the API payload when fields are available.'
+                            : 'The endpoint is unavailable or incomplete, so the table below is using deterministic local calculations.'}
                     </div>
                     {error && (
                         <div style={{ ...styles.label, marginTop: tokens.spacing.sm }}>

@@ -63,8 +63,27 @@ function Toggle({ active, onToggle }) {
 }
 
 export default function Settings() {
-    const { clearAuth, preferences, setPreference, celestialData } = useStore();
-    const liveCount = celestialData?.count || 0;
+    const { clearAuth, preferences, setPreference, celestialData, celestialStatus, celestialNote } = useStore();
+    const liveCount = Object.values(celestialData?.categories || {}).reduce(
+        (total, items) => total + (Array.isArray(items) ? items.length : 0),
+        0
+    );
+    const statusLabel = celestialStatus === 'live'
+        ? 'LIVE'
+        : celestialStatus === 'cached'
+            ? 'CACHED'
+            : celestialStatus === 'loading'
+                ? 'LOADING'
+                : celestialStatus === 'disabled'
+                    ? 'DISABLED'
+                    : celestialStatus === 'demo'
+                        ? 'DEGRADED'
+                        : 'IDLE';
+    const statusColor = celestialStatus === 'live' || celestialStatus === 'cached'
+        ? tokens.green
+        : celestialStatus === 'loading'
+            ? tokens.gold
+            : tokens.textMuted;
 
     return (
         <div style={styles.container}>
@@ -112,13 +131,28 @@ export default function Settings() {
                         onToggle={() => setPreference('showChineseLayer', !preferences.showChineseLayer)}
                     />
                 </div>
+                <div style={settStyles.row}>
+                    <div>
+                        <div style={{ fontSize: '14px', color: tokens.text }}>Solar Layer</div>
+                        <div style={styles.label}>Show solar activity gauges and flare context.</div>
+                    </div>
+                    <Toggle
+                        active={preferences.showSolarLayer}
+                        onToggle={() => setPreference('showSolarLayer', !preferences.showSolarLayer)}
+                    />
+                </div>
                 <div style={{ ...settStyles.row, borderBottom: 'none' }}>
                     <div>
-                        <div style={{ fontSize: '14px', color: tokens.text }}>API Status</div>
-                        <div style={styles.label}>{liveCount} live celestial signals loaded</div>
+                        <div style={{ fontSize: '14px', color: tokens.text }}>Session Telemetry</div>
+                        <div style={styles.label}>
+                            {liveCount > 0 ? `${liveCount} celestial features cached in this session` : 'No cached celestial features yet'}
+                        </div>
+                        <div style={{ ...styles.label, marginTop: tokens.spacing.xs }}>
+                            {celestialNote}
+                        </div>
                     </div>
-                    <div style={{ fontSize: '13px', color: liveCount > 0 ? tokens.green : tokens.textMuted, fontFamily: tokens.fontMono }}>
-                        {liveCount > 0 ? 'LIVE' : 'FALLBACK'}
+                    <div style={{ fontSize: '13px', color: statusColor, fontFamily: tokens.fontMono }}>
+                        {statusLabel}
                     </div>
                 </div>
             </div>

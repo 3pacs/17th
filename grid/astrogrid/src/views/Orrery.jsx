@@ -15,7 +15,7 @@ import { tokens, styles } from '../styles/tokens.js';
 
 const viewStyles = {
     hero: {
-        padding: `${tokens.spacing.xxl} ${tokens.spacing.lg} ${tokens.spacing.lg}`,
+        padding: `clamp(20px, 4vw, 32px) clamp(16px, 4vw, 24px) ${tokens.spacing.lg}`,
     },
     heroGrid: {
         display: 'grid',
@@ -50,8 +50,8 @@ const viewStyles = {
         lineHeight: 1.7,
     },
     statRail: {
-        display: 'flex',
-        flexWrap: 'wrap',
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))',
         gap: tokens.spacing.sm,
         marginTop: tokens.spacing.lg,
     },
@@ -93,14 +93,17 @@ const viewStyles = {
 };
 
 export default function Orrery() {
-    const { celestialData, preferences, setCelestialData } = useStore();
+    const { celestialData, celestialStatus, preferences, selectedDate, setCelestialData } = useStore();
     const [error, setError] = useState(null);
     const [loading, setLoading] = useState(false);
 
-    const today = useMemo(() => new Date(), []);
-    const positions = useMemo(() => Object.values(computeAllPositions(today)), [today]);
-    const aspects = useMemo(() => computeAspects(today), [today]);
-    const lunar = useMemo(() => computeLunarPhase(today), [today]);
+    const referenceDate = useMemo(() => {
+        const parsed = new Date(`${selectedDate}T12:00:00Z`);
+        return Number.isNaN(parsed.getTime()) ? new Date() : parsed;
+    }, [selectedDate]);
+    const positions = useMemo(() => Object.values(computeAllPositions(referenceDate)), [referenceDate]);
+    const aspects = useMemo(() => computeAspects(referenceDate), [referenceDate]);
+    const lunar = useMemo(() => computeLunarPhase(referenceDate), [referenceDate]);
 
     const retrogrades = useMemo(
         () => positions.filter((body) => body.is_retrograde && body.planet !== 'Rahu' && body.planet !== 'Ketu'),
@@ -109,18 +112,36 @@ export default function Orrery() {
     const categories = normalizeCelestialCategories(celestialData);
     const categorySummary = summarizeCategories(celestialData);
     const highlights = getCategoryHighlights(celestialData);
+    const hasLiveTelemetry = Boolean(celestialData?.categories);
+    const sourceLabel = preferences.useLiveTelemetry && hasLiveTelemetry ? 'Live signal feed' : 'Local ephemeris';
 
     useEffect(() => {
         let cancelled = false;
 
         if (!preferences.useLiveTelemetry) {
+            setError(null);
             setLoading(false);
             return () => {
                 cancelled = true;
             };
         }
 
+        if (hasLiveTelemetry) {
+            setLoading(false);
+            return () => {
+                cancelled = true;
+            };
+        }
+
+        if (celestialStatus === 'loading') {
+            setLoading(true);
+            return () => {
+                cancelled = true;
+            };
+        }
+
         setLoading(true);
+        setError(null);
         api.getCelestialSignals()
             .then((payload) => {
                 if (!cancelled) setCelestialData(payload);
@@ -135,7 +156,7 @@ export default function Orrery() {
         return () => {
             cancelled = true;
         };
-    }, [preferences.useLiveTelemetry, setCelestialData]);
+    }, [celestialStatus, hasLiveTelemetry, preferences.useLiveTelemetry, setCelestialData]);
 
     return (
         <div>
@@ -158,6 +179,10 @@ export default function Orrery() {
                         </div>
                         <div style={viewStyles.statRail}>
                             <div style={viewStyles.statChip}>
+                                <div style={viewStyles.smallLabel}>Session Date</div>
+                                <div style={styles.value}>{selectedDate}</div>
+                            </div>
+                            <div style={viewStyles.statChip}>
                                 <div style={viewStyles.smallLabel}>Tracked Bodies</div>
                                 <div style={styles.value}>{positions.length}</div>
                             </div>
@@ -169,6 +194,10 @@ export default function Orrery() {
                                 <div style={viewStyles.smallLabel}>Moon Phase</div>
                                 <div style={styles.value}>{lunar.phase_name}</div>
                             </div>
+                            <div style={viewStyles.statChip}>
+                                <div style={viewStyles.smallLabel}>Signal Source</div>
+                                <div style={styles.value}>{sourceLabel}</div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -176,6 +205,9 @@ export default function Orrery() {
 
             <div style={styles.container}>
                 {error && <div style={styles.error}>{error}</div>}
+                <div style={{ ...styles.label, marginBottom: tokens.spacing.md }}>
+                    Reference time is pinned to {selectedDate} so the hero and support panels stay aligned with the shared session state.
+                </div>
 
                 <RetrogradeBanner
                     retrogrades={retrogrades.map((body) => body.planet)}
@@ -231,8 +263,8 @@ export default function Orrery() {
                         {!highlights.length && (
                             <div style={styles.card}>
                                 <div style={styles.value}>
-                                    Live celestial telemetry is not available yet. The Orrery is using local
-                                    ephemeris math, and this section will enrich automatically when the signal feed populates.
+                                    {sourceLabel} is the current driver for this view. The Orrery uses local ephemeris math,
+                                    and this section will enrich automatically when the signal feed populates.
                                 </div>
                             </div>
                         )}

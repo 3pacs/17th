@@ -25,31 +25,60 @@ function normalizeApiCorrelations(payload) {
 }
 
 export default function Correlations() {
-    const { celestialData, correlationData, setCorrelationData } = useStore();
+    const { celestialData, setCorrelationData } = useStore();
     const [hovered, setHovered] = useState(null);
     const [error, setError] = useState(null);
+    const [status, setStatus] = useState('loading');
+    const [statusNote, setStatusNote] = useState('Waiting for live correlation data.');
     const [loading, setLoading] = useState(false);
 
     const fallback = useMemo(() => buildCorrelationMatrix(celestialData), [celestialData]);
-    const heatmapData = useMemo(() => {
-        if (Array.isArray(correlationData) && correlationData.length) {
-            return normalizeApiCorrelations({ correlations: correlationData }) || fallback;
-        }
-        return fallback;
-    }, [correlationData, fallback]);
+    const [heatmapData, setHeatmapData] = useState(fallback);
+
+    useEffect(() => {
+        setHeatmapData(fallback);
+    }, [fallback]);
 
     useEffect(() => {
         let cancelled = false;
 
+        setError(null);
         setLoading(true);
+        setStatus('loading');
+        setStatusNote('Waiting for live correlation data.');
         api.getCorrelations({ market: 'spy', feature: 'lunar_phase', period: '1Y' })
             .then((data) => {
-                if (!cancelled && Array.isArray(data?.correlations)) {
-                    setCorrelationData(data.correlations);
+                if (cancelled) return;
+
+                if (!Array.isArray(data?.correlations) || !data.correlations.length) {
+                    setHeatmapData(fallback);
+                    setStatus('demo');
+                    setStatusNote('Correlation endpoint returned an unexpected shape, so the deterministic demo matrix is shown.');
+                    setCorrelationData([]);
+                    return;
                 }
+
+                const normalized = normalizeApiCorrelations(data);
+                if (normalized) {
+                    setCorrelationData(data.correlations);
+                    setHeatmapData(normalized);
+                    setStatus('live');
+                    setStatusNote('Live backend correlations loaded.');
+                    return;
+                }
+
+                setHeatmapData(fallback);
+                setStatus('demo');
+                setStatusNote('Correlation payload was present but not normalized, so the deterministic demo matrix is shown.');
+                setCorrelationData(data.correlations);
             })
             .catch((e) => {
-                if (!cancelled) setError(e.message);
+                if (cancelled) return;
+                setError(e.message);
+                setHeatmapData(fallback);
+                setStatus('demo');
+                setStatusNote('Correlation endpoint unavailable, so the deterministic demo matrix is shown.');
+                setCorrelationData([]);
             })
             .finally(() => {
                 if (!cancelled) setLoading(false);
@@ -67,6 +96,19 @@ export default function Correlations() {
 
             {error && <div style={styles.error}>{error}</div>}
             {loading && <div style={styles.loading}>Analyzing correlations...</div>}
+            <div style={styles.card}>
+                <div style={styles.subheader}>Data Source</div>
+                <div style={styles.value}>
+                    {status === 'live'
+                        ? 'Live backend correlations'
+                        : status === 'loading'
+                            ? 'Checking live correlations...'
+                            : 'Generated demo matrix'}
+                </div>
+                <div style={{ ...styles.label, marginTop: tokens.spacing.sm }}>
+                    {statusNote}
+                </div>
+            </div>
 
             <CorrelationHeatmap
                 rows={heatmapData.rows.map((row) => row.label || row)}

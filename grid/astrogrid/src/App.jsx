@@ -1,4 +1,5 @@
 import React, { Suspense, lazy, useEffect } from 'react';
+import api from './api.js';
 import useStore from './store.js';
 import NavBar from './components/NavBar.jsx';
 import { tokens } from './styles/tokens.js';
@@ -10,6 +11,28 @@ const Correlations = lazy(() => import('./views/Correlations.jsx'));
 const Timeline = lazy(() => import('./views/Timeline.jsx'));
 const Narrative = lazy(() => import('./views/Narrative.jsx'));
 const Settings = lazy(() => import('./views/Settings.jsx'));
+
+const VIEW_IDS = new Set([
+    'orrery',
+    'lunar',
+    'ephemeris',
+    'correlations',
+    'timeline',
+    'narrative',
+    'settings',
+]);
+
+function getViewFromHash() {
+    if (typeof window === 'undefined') {
+        return 'orrery';
+    }
+
+    const hash = window.location.hash.startsWith('#/')
+        ? window.location.hash.slice(2)
+        : '';
+
+    return VIEW_IDS.has(hash) ? hash : 'orrery';
+}
 
 const appStyles = {
     app: {
@@ -72,16 +95,84 @@ const appStyles = {
 };
 
 function App() {
-    const { isAuthenticated, activeView, setActiveView } = useStore();
+    const {
+        isAuthenticated,
+        activeView,
+        celestialData,
+        preferences,
+        setActiveView,
+        setCelestialData,
+        setCelestialTelemetryState,
+    } = useStore();
 
     useEffect(() => {
-        const hash = window.location.hash.slice(2) || 'orrery';
-        setActiveView(hash);
+        const syncFromHash = () => {
+            setActiveView(getViewFromHash());
+        };
+
+        if (!window.location.hash) {
+            window.location.hash = '#/orrery';
+        }
+        syncFromHash();
+        window.addEventListener('hashchange', syncFromHash);
+
+        return () => {
+            window.removeEventListener('hashchange', syncFromHash);
+        };
     }, [setActiveView]);
 
+    useEffect(() => {
+        let cancelled = false;
+
+        if (!isAuthenticated) {
+            return () => {
+                cancelled = true;
+            };
+        }
+
+        if (!preferences.useLiveTelemetry) {
+            setCelestialTelemetryState('disabled', 'Live telemetry is disabled for this session.');
+            return () => {
+                cancelled = true;
+            };
+        }
+
+        if (celestialData?.categories) {
+            setCelestialTelemetryState('cached', 'Live celestial telemetry is already cached for this session.');
+            return () => {
+                cancelled = true;
+            };
+        }
+
+        setCelestialTelemetryState('loading', 'Loading live celestial telemetry for this session.');
+        api.getCelestialSignals()
+            .then((payload) => {
+                if (cancelled) return;
+                setCelestialData(payload);
+                setCelestialTelemetryState('live', 'Live celestial telemetry loaded for this session.');
+            })
+            .catch((error) => {
+                if (cancelled) return;
+                setCelestialTelemetryState(
+                    'demo',
+                    `Live celestial telemetry is unavailable right now: ${error.message}`
+                );
+            });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [
+        celestialData?.categories,
+        isAuthenticated,
+        preferences.useLiveTelemetry,
+        setCelestialData,
+        setCelestialTelemetryState,
+    ]);
+
     const navigate = (view) => {
-        window.location.hash = `#/${view}`;
         setActiveView(view);
+        window.location.hash = `#/${view}`;
     };
 
     if (!isAuthenticated) {

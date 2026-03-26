@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { Html, Line, OrbitControls, Stars } from '@react-three/drei';
 import { eclipticTo3D } from '../lib/aspects.js';
@@ -17,16 +17,68 @@ const ORBIT_RADII = {
     Pluto: 5.95,
 };
 const PLANET_COLORS = {
-    Mercury: '#C4B5FD',
-    Venus: '#F9A8D4',
-    Moon: '#E2E8F0',
-    Mars: '#FB7185',
-    Jupiter: '#F59E0B',
-    Saturn: '#FDE68A',
+    Mercury: tokens.purple,
+    Venus: '#DB2777',
+    Moon: tokens.textBright,
+    Mars: tokens.red,
+    Jupiter: tokens.gold,
+    Saturn: '#FCD34D',
     Uranus: '#67E8F9',
-    Neptune: '#60A5FA',
+    Neptune: tokens.accent,
     Pluto: '#94A3B8',
 };
+
+function useViewportProfile() {
+    const [profile, setProfile] = useState({
+        compact: true,
+        reducedMotion: false,
+        webgl: true,
+    });
+
+    useEffect(() => {
+        if (typeof window === 'undefined') return undefined;
+
+        const compactQuery = window.matchMedia('(max-width: 720px)');
+        const motionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+        const supportsWebGL = (() => {
+            try {
+                const canvas = document.createElement('canvas');
+                return Boolean(canvas.getContext('webgl2') || canvas.getContext('webgl'));
+            } catch {
+                return false;
+            }
+        })();
+
+        const sync = () => {
+            setProfile({
+                compact: compactQuery.matches,
+                reducedMotion: motionQuery.matches,
+                webgl: supportsWebGL,
+            });
+        };
+
+        sync();
+
+        const attach = (query) => {
+            if (query.addEventListener) {
+                query.addEventListener('change', sync);
+                return () => query.removeEventListener('change', sync);
+            }
+            query.addListener(sync);
+            return () => query.removeListener(sync);
+        };
+
+        const detachCompact = attach(compactQuery);
+        const detachMotion = attach(motionQuery);
+
+        return () => {
+            detachCompact();
+            detachMotion();
+        };
+    }, []);
+
+    return profile;
+}
 
 function OrbitRing({ radius }) {
     return (
@@ -37,9 +89,9 @@ function OrbitRing({ radius }) {
     );
 }
 
-function PlanetMarker({ body, radius }) {
+function PlanetMarker({ body, radius, compact }) {
     const point = eclipticTo3D(body.geocentric_longitude, radius);
-    const size = body.planet === 'Moon' ? 0.12 : 0.15;
+    const size = compact ? (body.planet === 'Moon' ? 0.09 : 0.12) : (body.planet === 'Moon' ? 0.12 : 0.15);
 
     return (
         <group position={[point.x, 0, point.z]}>
@@ -51,18 +103,19 @@ function PlanetMarker({ body, radius }) {
                     emissiveIntensity={body.is_retrograde ? 0.8 : 0.35}
                 />
             </mesh>
-            <Html distanceFactor={12}>
+            <Html distanceFactor={compact ? 10 : 12} center>
                 <div style={{
                     padding: '4px 8px',
                     borderRadius: '999px',
-                    background: 'rgba(5, 8, 16, 0.82)',
-                    border: `1px solid ${body.is_retrograde ? '#7C3AED' : '#1E365A'}`,
-                    color: '#E8F0F8',
-                    fontSize: '10px',
+                    background: 'rgba(11, 13, 26, 0.86)',
+                    border: `1px solid ${body.is_retrograde ? tokens.purple : tokens.cardBorder}`,
+                    color: tokens.textBright,
+                    fontSize: compact ? '9px' : '10px',
                     lineHeight: 1.2,
                     whiteSpace: 'nowrap',
-                    fontFamily: "'IBM Plex Mono', monospace",
+                    fontFamily: tokens.fontMono,
                     transform: 'translate3d(-50%, -150%, 0)',
+                    pointerEvents: 'none',
                 }}>
                     {body.planet} {body.is_retrograde ? 'Rx' : ''}
                 </div>
@@ -71,7 +124,7 @@ function PlanetMarker({ body, radius }) {
     );
 }
 
-function AspectLayer({ positions, aspects }) {
+function AspectLayer({ positions, aspects, compact }) {
     const lookup = useMemo(() => {
         const map = {};
         for (const body of positions) {
@@ -80,7 +133,7 @@ function AspectLayer({ positions, aspects }) {
         return map;
     }, [positions]);
 
-    const visibleAspects = (aspects || []).filter((aspect) => aspect.orb_used <= 4).slice(0, 16);
+    const visibleAspects = (aspects || []).filter((aspect) => aspect.orb_used <= 4).slice(0, compact ? 10 : 16);
 
     return visibleAspects.map((aspect) => {
         const from = lookup[aspect.planet1];
@@ -98,7 +151,7 @@ function AspectLayer({ positions, aspects }) {
                 key={`${aspect.planet1}-${aspect.planet2}-${aspect.aspect_type}`}
                 points={[
                     [from.x, 0.02, from.z],
-                    [(from.x + to.x) / 2, 0.35, (from.z + to.z) / 2],
+                    [(from.x + to.x) / 2, compact ? 0.24 : 0.35, (from.z + to.z) / 2],
                     [to.x, 0.02, to.z],
                 ]}
                 color={color}
@@ -110,42 +163,48 @@ function AspectLayer({ positions, aspects }) {
     });
 }
 
-function OrreryScene({ positions, aspects, showAspectLines, autoRotate }) {
+function OrreryScene({ positions, aspects, showAspectLines, autoRotate, compact, reducedMotion }) {
+    const starCount = compact ? 900 : 2200;
+    const starFactor = compact ? 2.2 : 3.2;
+
     return (
         <>
-            <color attach="background" args={['#050810']} />
+            <color attach="background" args={[tokens.bg]} />
             <ambientLight intensity={0.65} />
-            <pointLight position={[0, 0, 0]} intensity={2.8} color="#4A9EFF" />
-            <pointLight position={[0, 6, 0]} intensity={0.5} color="#7C3AED" />
-            <Stars radius={60} depth={32} count={2500} factor={3.2} saturation={0} fade speed={0.45} />
+            <pointLight position={[0, 0, 0]} intensity={2.8} color={tokens.accent} />
+            <pointLight position={[0, 6, 0]} intensity={0.5} color={tokens.purple} />
+            {!reducedMotion && <Stars radius={60} depth={32} count={starCount} factor={starFactor} saturation={0} fade speed={0.45} />}
 
             <mesh>
                 <sphereGeometry args={[0.42, 32, 32]} />
-                <meshStandardMaterial color="#F8C15C" emissive="#C77612" emissiveIntensity={1.35} />
+                <meshStandardMaterial color={tokens.gold} emissive="#C77612" emissiveIntensity={1.35} />
             </mesh>
 
             {PLANET_ORDER.map((planet) => (
                 <OrbitRing key={`orbit-${planet}`} radius={ORBIT_RADII[planet]} />
             ))}
 
-            {showAspectLines ? <AspectLayer positions={positions} aspects={aspects} /> : null}
+            {showAspectLines ? <AspectLayer positions={positions} aspects={aspects} compact={compact} /> : null}
 
             {positions.map((body) => (
                 <PlanetMarker
                     key={body.planet}
                     body={body}
                     radius={ORBIT_RADII[body.planet] || 2.5}
+                    compact={compact}
                 />
             ))}
 
             <OrbitControls
                 enablePan={false}
-                autoRotate={autoRotate}
-                autoRotateSpeed={0.35}
-                minDistance={6}
-                maxDistance={14}
-                maxPolarAngle={Math.PI / 2.05}
-                minPolarAngle={Math.PI / 3.2}
+                enableDamping={!reducedMotion}
+                dampingFactor={0.08}
+                autoRotate={autoRotate && !reducedMotion}
+                autoRotateSpeed={0.3}
+                minDistance={compact ? 5.2 : 6}
+                maxDistance={compact ? 12 : 14}
+                maxPolarAngle={Math.PI / 2.08}
+                minPolarAngle={Math.PI / 3.25}
             />
         </>
     );
@@ -157,22 +216,57 @@ export default function PlanetaryOrrery({
     showAspectLines = true,
     autoRotate = true,
 }) {
+    const profile = useViewportProfile();
+
+    if (!profile.webgl) {
+        return (
+            <div style={{
+                minHeight: '320px',
+                width: '100%',
+                borderRadius: tokens.radius.xl,
+                overflow: 'hidden',
+                border: `1px solid ${tokens.cardBorder}`,
+                background: 'linear-gradient(180deg, rgba(11, 13, 26, 0.98) 0%, rgba(17, 24, 39, 0.96) 100%)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: tokens.spacing.lg,
+                color: tokens.textMuted,
+                fontFamily: tokens.fontMono,
+                textAlign: 'center',
+            }}>
+                3D Orrery unavailable in this browser. The date, aspect, and telemetry panels still work normally.
+            </div>
+        );
+    }
+
     return (
         <div style={{
-            height: 'min(62vw, 480px)',
-            minHeight: '360px',
+            height: 'clamp(300px, 72vw, 520px)',
+            minHeight: '300px',
             width: '100%',
             borderRadius: tokens.radius.xl,
             overflow: 'hidden',
             border: `1px solid ${tokens.cardBorder}`,
-            background: 'radial-gradient(circle at 50% 50%, rgba(74, 158, 255, 0.18) 0%, rgba(5, 8, 16, 1) 68%)',
+            background: 'radial-gradient(circle at 50% 50%, rgba(74, 144, 217, 0.18) 0%, rgba(11, 13, 26, 1) 68%)',
         }}>
-            <Canvas camera={{ position: [0, 6.25, 7.8], fov: 42 }}>
+            <Canvas
+                camera={{ position: profile.compact ? [0, 5.4, 8.8] : [0, 6.25, 7.8], fov: profile.compact ? 48 : 42 }}
+                dpr={[1, profile.compact ? 1.35 : 1.75]}
+                frameloop={profile.reducedMotion ? 'demand' : 'always'}
+                gl={{
+                    powerPreference: 'high-performance',
+                    antialias: true,
+                    alpha: false,
+                }}
+            >
                 <OrreryScene
                     positions={positions}
                     aspects={aspects}
                     showAspectLines={showAspectLines}
                     autoRotate={autoRotate}
+                    compact={profile.compact}
+                    reducedMotion={profile.reducedMotion}
                 />
             </Canvas>
         </div>

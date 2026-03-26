@@ -11,6 +11,9 @@ export default function Timeline() {
     const [events, setEvents] = useState([]);
     const [eclipses, setEclipses] = useState(null);
     const [error, setError] = useState(null);
+    const [timelineSource, setTimelineSource] = useState('loading');
+    const [eclipseSource, setEclipseSource] = useState('loading');
+    const [statusNote, setStatusNote] = useState('Waiting for live timeline and eclipse payloads.');
     const [loading, setLoading] = useState(false);
 
     const date = useMemo(() => new Date(`${selectedDate}T12:00:00Z`), [selectedDate]);
@@ -20,29 +23,76 @@ export default function Timeline() {
     useEffect(() => {
         let cancelled = false;
 
+        setError(null);
         setLoading(true);
-        Promise.all([
+        Promise.allSettled([
             api.getTimeline({
                 start: selectedDate,
                 end: new Date(date.getTime() + 1000 * 60 * 60 * 24 * 60).toISOString().slice(0, 10),
-            }).catch(() => ({ events: fallbackEvents })),
-            api.getEclipses().catch(() => fallbackEclipses),
-        ])
-            .then(([timelinePayload, eclipsePayload]) => {
-                if (cancelled) return;
-                setEvents(Array.isArray(timelinePayload) ? timelinePayload : timelinePayload.events || fallbackEvents);
-                setEclipses(eclipsePayload || fallbackEclipses);
-            })
-            .catch((e) => {
-                if (!cancelled) {
-                    setError(e.message);
+            }),
+            api.getEclipses(),
+        ]).then(([timelineResult, eclipseResult]) => {
+            if (cancelled) return;
+
+            let nextTimelineSource = 'demo';
+            let nextEclipseSource = 'demo';
+            const notes = [];
+
+            if (timelineResult.status === 'fulfilled') {
+                const timelinePayload = timelineResult.value;
+                const timelineEvents = Array.isArray(timelinePayload)
+                    ? timelinePayload
+                    : timelinePayload?.events || timelinePayload?.items || [];
+
+                if (timelineEvents.length) {
+                    setEvents(timelineEvents);
+                    nextTimelineSource = 'live';
+                } else {
                     setEvents(fallbackEvents);
-                    setEclipses(fallbackEclipses);
+                    notes.push('Timeline payload was empty, so the fallback event ribbon is shown.');
                 }
-            })
-            .finally(() => {
-                if (!cancelled) setLoading(false);
-            });
+            } else {
+                setEvents(fallbackEvents);
+                notes.push('Timeline endpoint unavailable, so the fallback event ribbon is shown.');
+                if (timelineResult.reason?.message) {
+                    setError(timelineResult.reason.message);
+                }
+            }
+
+            if (eclipseResult.status === 'fulfilled') {
+                const eclipsePayload = eclipseResult.value;
+                if (eclipsePayload?.next_lunar || eclipsePayload?.next_solar) {
+                    setEclipses(eclipsePayload);
+                    nextEclipseSource = 'live';
+                } else {
+                    setEclipses(fallbackEclipses);
+                    notes.push('Eclipse payload was empty, so the fallback countdown is shown.');
+                }
+            } else {
+                setEclipses(fallbackEclipses);
+                notes.push('Eclipse endpoint unavailable, so the fallback countdown is shown.');
+                if (!error && eclipseResult.reason?.message) {
+                    setError(eclipseResult.reason.message);
+                }
+            }
+
+            setTimelineSource(nextTimelineSource);
+            setEclipseSource(nextEclipseSource);
+
+            if (nextTimelineSource === 'live' && nextEclipseSource === 'live') {
+                setStatusNote('Live timeline and eclipse data loaded.');
+            } else if (nextTimelineSource === 'live' || nextEclipseSource === 'live') {
+                setStatusNote('Partial live data loaded. Some fallback content remains visible.');
+            } else {
+                setStatusNote('Demo timeline mode is active because the live payloads were unavailable or empty.');
+            }
+
+            if (notes.length) {
+                setStatusNote((current) => `${current} ${notes.join(' ')}`);
+            }
+        }).finally(() => {
+            if (!cancelled) setLoading(false);
+        });
 
         return () => {
             cancelled = true;
@@ -56,6 +106,21 @@ export default function Timeline() {
 
             {error && <div style={styles.error}>{error}</div>}
             {loading && <div style={styles.loading}>Loading timeline...</div>}
+            <div style={styles.card}>
+                <div style={styles.subheader}>Data Source</div>
+                <div style={styles.value}>
+                    {timelineSource === 'loading' || eclipseSource === 'loading'
+                        ? 'Checking live timeline data...'
+                        : timelineSource === 'live' && eclipseSource === 'live'
+                        ? 'Live timeline and eclipse data'
+                        : timelineSource === 'live' || eclipseSource === 'live'
+                            ? 'Partial live data'
+                            : 'Generated demo timeline'}
+                </div>
+                <div style={{ ...styles.label, marginTop: tokens.spacing.sm }}>
+                    {statusNote}
+                </div>
+            </div>
 
             <div style={{
                 display: 'grid',
