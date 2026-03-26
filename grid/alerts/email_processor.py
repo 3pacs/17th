@@ -450,7 +450,47 @@ class HermesEmailProcessor:
             except Exception as exc:
                 log.debug("FxTwitter failed: {e}", e=str(exc))
 
-        # Strategy 2: Ask Perplexity to find the tweet content
+        # Strategy 2: Syndication API (undocumented but rich data)
+        if tweet_id:
+            try:
+                syn_url = f"https://cdn.syndication.twimg.com/tweet-result?id={tweet_id}&token=1"
+                req = urllib.request.Request(syn_url, headers={"User-Agent": "GRID-Hermes/1.0"})
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    sdata = json.loads(resp.read(256_000))
+                    stext = sdata.get("text", "")
+                    if stext:
+                        suser = sdata.get("user", {}).get("screen_name", username)
+                        slikes = sdata.get("favorite_count", 0)
+                        srts = sdata.get("retweet_count", 0)
+                        result = (
+                            f"[X/Twitter Post]\n"
+                            f"@{suser}: {stext}\n"
+                            f"Engagement: {slikes} likes, {srts} RTs"
+                        )
+                        log.info("Hermes resolved X via syndication: @{u}", u=suser)
+                        return result[:3000]
+            except Exception as exc:
+                log.debug("Syndication API failed: {e}", e=str(exc))
+
+        # Strategy 3: oEmbed API (very reliable, returns text in HTML)
+        try:
+            oembed_url = f"https://publish.twitter.com/oembed?url={url}&omit_script=true"
+            req = urllib.request.Request(oembed_url, headers={"User-Agent": "GRID-Hermes/1.0"})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                odata = json.loads(resp.read(64_000))
+                ohtml = odata.get("html", "")
+                if ohtml:
+                    # Extract text from the embed HTML
+                    otext = re.sub(r'<[^>]+>', ' ', ohtml)
+                    otext = re.sub(r'\s+', ' ', otext).strip()
+                    author = odata.get("author_name", username)
+                    result = f"[X/Twitter Post — @{author}]\n{otext}"
+                    log.info("Hermes resolved X via oEmbed: @{u}", u=author)
+                    return result[:3000]
+        except Exception as exc:
+            log.debug("oEmbed failed: {e}", e=str(exc))
+
+        # Strategy 4: Ask Perplexity as last resort
         content = self._query_perplexity(
             f"Find and summarize the content of this X/Twitter post by @{username}: {url}\n"
             f"Include: the full tweet text, any key claims or data points, "
