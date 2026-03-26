@@ -12,9 +12,11 @@ dependencies.
 from __future__ import annotations
 
 import json
+import re
 import traceback
 from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import urlparse
 
 from loguru import logger as log
 from sqlalchemy import text as sa_text
@@ -180,8 +182,103 @@ class HermesEmailProcessor:
             resp=parsed.get("hermes_response", "?"),
         )
 
+    def _extract_urls(self, text: str) -> list[str]:
+        """Extract URLs from email body text.
+
+        Returns up to 5 URLs, filtering out image/tracking/unsubscribe links.
+        """
+        url_pattern = re.compile(
+            r'https?://[^\s<>\"\'\)\]]+', re.IGNORECASE
+        )
+        raw_urls = url_pattern.findall(text or "")
+
+        # Filter out noise
+        skip_patterns = [
+            r"unsubscribe", r"tracking", r"click\.", r"mailchimp",
+            r"list-manage", r"\.(png|jpg|gif|svg|ico|css|js)(\?|$)",
+            r"google\.com/maps", r"accounts\.google", r"support\.google",
+        ]
+        filtered = []
+        for url in raw_urls:
+            url = url.rstrip(".,;:!?)")  # strip trailing punctuation
+            if any(re.search(p, url, re.IGNORECASE) for p in skip_patterns):
+                continue
+            if url not in filtered:
+                filtered.append(url)
+            if len(filtered) >= 5:
+                break
+        return filtered
+
+    def _fetch_url_content(self, url: str) -> str | None:
+        """Fetch a URL and return cleaned text content.
+
+        Uses urllib (stdlib) with a 15-second timeout and 500KB size limit.
+        Returns None on any failure.
+        """
+        import urllib.request
+        import urllib.error
+
+        try:
+            req = urllib.request.Request(
+                url,
+                headers={
+                    "User-Agent": "GRID-Hermes/1.0 (intelligence platform)",
+                    "Accept": "text/html,application/xhtml+xml,text/plain",
+                },
+            )
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                content_type = resp.headers.get("Content-Type", "")
+                if "text" not in content_type and "html" not in content_type:
+                    return None
+
+                raw = resp.read(512_000)  # 500KB max
+                charset = resp.headers.get_content_charset() or "utf-8"
+                html = raw.decode(charset, errors="replace")
+
+            # Strip HTML to text
+            # Remove script/style blocks
+            text = re.sub(r'<(script|style)[^>]*>.*?</\1>', '', html, flags=re.DOTALL | re.IGNORECASE)
+            # Remove HTML tags
+            text = re.sub(r'<[^>]+>', ' ', text)
+            # Collapse whitespace
+            text = re.sub(r'\s+', ' ', text).strip()
+            # Remove common boilerplate
+            text = re.sub(r'(Cookie|Privacy|Terms of Service|Sign in|Log in).*?\.', '', text, flags=re.IGNORECASE)
+
+            # Truncate to something reasonable for LLM context
+            return text[:3000] if text else None
+
+        except (urllib.error.URLError, urllib.error.HTTPError, OSError, ValueError) as exc:
+            log.debug("Failed to fetch URL {u}: {e}", u=url[:80], e=str(exc))
+            return None
+        except Exception as exc:
+            log.debug("Unexpected error fetching {u}: {e}", u=url[:80], e=str(exc))
+            return None
+
+    def _fetch_linked_content(self, body: str) -> str:
+        """Extract URLs from email body, fetch their content, return combined text.
+
+        Returns a formatted string of fetched content, or empty string if none.
+        """
+        urls = self._extract_urls(body)
+        if not urls:
+            return ""
+
+        sections = []
+        for url in urls:
+            content = self._fetch_url_content(url)
+            if content and len(content) > 100:  # skip trivially short pages
+                domain = urlparse(url).netloc
+                sections.append(f"[Content from {domain}]\n{content}")
+                log.info("Hermes fetched link: {u} ({n} chars)", u=url[:80], n=len(content))
+
+        return "\n\n".join(sections)
+
     def _build_prompt(self, msg: dict[str, Any]) -> str:
         """Build the LLM prompt for email analysis.
+
+        Extracts and fetches any URLs in the email body so the LLM can
+        analyze the linked content alongside the email text.
 
         Args:
             msg: Email dict with from_address, subject, body_text.
@@ -192,12 +289,22 @@ class HermesEmailProcessor:
         # Truncate body to avoid exceeding context window
         body = (msg.get("body_text") or "")[:4000]
 
+        # Fetch linked content
+        linked = self._fetch_linked_content(body)
+        linked_section = ""
+        if linked:
+            linked_section = f"""
+
+LINKED CONTENT (fetched from URLs in the email):
+{linked[:3000]}
+"""
+
         return f"""Analyze this email sent to the GRID intelligence platform and extract structured intelligence.
 
 FROM: {msg['from_address']}
 SUBJECT: {msg['subject']}
 BODY:
-{body}
+{body}{linked_section}
 
 Return your analysis as a JSON object with EXACTLY this schema:
 {_JSON_SCHEMA}
@@ -209,6 +316,7 @@ Rules:
 - tickers_mentioned should be uppercase stock/crypto ticker symbols (e.g. SPY, BTC, ETH, AAPL)
 - action_items, notes, and plans can be empty arrays if not applicable
 - summary should be 1-2 concise sentences
+- Include intelligence from BOTH the email text AND any linked content
 - Return ONLY the JSON object, nothing else"""
 
     def _parse_llm_response(self, raw: str) -> dict[str, Any] | None:
