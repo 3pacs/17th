@@ -255,12 +255,33 @@ class HermesEmailProcessor:
             log.debug("Unexpected error fetching {u}: {e}", u=url[:80], e=str(exc))
             return None
 
-    def _fetch_linked_content(self, body: str) -> str:
+    def _extract_urls_from_html(self, html: str) -> list[str]:
+        """Extract href URLs from HTML body."""
+        href_pattern = re.compile(r'href=["\']?(https?://[^\s"\'<>]+)', re.IGNORECASE)
+        return href_pattern.findall(html or "")
+
+    def _fetch_linked_content(self, body: str, html: str | None = None) -> str:
         """Extract URLs from email body, fetch their content, return combined text.
 
         Returns a formatted string of fetched content, or empty string if none.
         """
         urls = self._extract_urls(body)
+        # Also check HTML body for href links not in plain text
+        if html:
+            html_urls = self._extract_urls_from_html(html)
+            for u in html_urls:
+                u = u.rstrip(".,;:!?)")
+                if u not in urls:
+                    urls.append(u)
+                if len(urls) >= 5:
+                    break
+        # Filter noise from combined list
+        skip_patterns = [
+            r"unsubscribe", r"tracking", r"click\.", r"mailchimp",
+            r"list-manage", r"\.(png|jpg|gif|svg|ico|css|js)(\?|$)",
+            r"google\.com/maps", r"accounts\.google", r"support\.google",
+        ]
+        urls = [u for u in urls if not any(re.search(p, u, re.IGNORECASE) for p in skip_patterns)][:5]
         if not urls:
             return ""
 
@@ -289,8 +310,9 @@ class HermesEmailProcessor:
         # Truncate body to avoid exceeding context window
         body = (msg.get("body_text") or "")[:4000]
 
-        # Fetch linked content
-        linked = self._fetch_linked_content(body)
+        # Fetch linked content (check both plain text and HTML for URLs)
+        html = (msg.get("body_html") or "")
+        linked = self._fetch_linked_content(body, html)
         linked_section = ""
         if linked:
             linked_section = f"""
