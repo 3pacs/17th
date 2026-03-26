@@ -14,10 +14,16 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 import pandas as pd
-from edgar import Company, Filing, get_filings, set_identity
 from loguru import logger as log
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
+
+try:
+    from edgar import Company, Filing, get_filings, set_identity
+    _HAS_EDGAR = True
+except ImportError:
+    _HAS_EDGAR = False
+    log.warning("edgartools not installed — EDGAR pulls will be skipped")
 
 # Top 50 hedge fund CIK numbers for 13F tracking
 # These are the most commonly tracked institutional investors
@@ -102,6 +108,11 @@ class EDGARPuller:
             db_engine: SQLAlchemy engine connected to the GRID database.
             identity: User-agent identity string for SEC EDGAR compliance.
         """
+        if not _HAS_EDGAR:
+            raise ImportError(
+                "edgartools is required for EDGARPuller — "
+                "install with: pip install 'edgartools>=5.0.0'"
+            )
         set_identity(identity)
         self.engine = db_engine
         self.source_id = self._resolve_source_id()
