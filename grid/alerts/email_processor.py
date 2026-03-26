@@ -254,19 +254,28 @@ class HermesEmailProcessor:
     def _resolve_perplexity_url(self, url: str) -> str | None:
         """Resolve a perplexity.ai URL via their API instead of scraping.
 
-        Extracts the topic/ticker from the URL and queries the API.
+        For finance links, asks a structured query that extracts data GRID can use.
         """
         from urllib.parse import urlparse, parse_qs
 
         parsed = urlparse(url)
         path = parsed.path.strip("/")
 
-        # perplexity.ai/finance/RXT → ask about RXT stock
+        # perplexity.ai/finance/RXT → structured finance query
         if path.startswith("finance/"):
             ticker = path.split("/")[1].upper()
+            self._last_resolved_ticker = ticker  # store for GRID integration
             return self._query_perplexity(
-                f"What is the current situation with {ticker} stock? "
-                f"Recent news, price action, analyst sentiment, and key risks. Be concise."
+                f"Give me a structured analysis of {ticker} stock. Include:\n"
+                f"1. Current price, market cap, P/E ratio, EPS, dividend yield\n"
+                f"2. 52-week high and low, recent price change (1d, 1w, 1m)\n"
+                f"3. Analyst consensus: number of buy/hold/sell ratings, average price target\n"
+                f"4. Top 3 recent news headlines with dates\n"
+                f"5. Recent insider trading activity (buys vs sells, notable transactions)\n"
+                f"6. Next earnings date and EPS estimate\n"
+                f"7. Key risks and catalysts\n"
+                f"8. Short interest or unusual options activity if available\n"
+                f"Be specific with numbers. No fluff."
             )
 
         # perplexity.ai/search?q=... → use the query directly
@@ -275,13 +284,182 @@ class HermesEmailProcessor:
             return self._query_perplexity(q)
 
         # Generic perplexity link — ask about the page topic
-        # Extract slug from path
         slug = path.split("/")[-1].replace("-", " ") if path else ""
         if slug:
             return self._query_perplexity(
                 f"Summarize the key information about: {slug}"
             )
 
+        return None
+
+    def _resolve_reddit_url(self, url: str) -> str | None:
+        """Resolve a Reddit URL by fetching the JSON API.
+
+        Appends .json to the URL to get structured data, then extracts
+        the post title, selftext, top comments, and metadata.
+        """
+        import urllib.request
+        import urllib.error
+
+        try:
+            # Normalize URL and append .json
+            clean_url = url.split("?")[0].rstrip("/")
+            # Handle redd.it short links
+            if "redd.it" in clean_url:
+                # Follow redirect first
+                req0 = urllib.request.Request(clean_url, headers={"User-Agent": "GRID-Hermes/1.0"})
+                with urllib.request.urlopen(req0, timeout=10) as resp0:
+                    clean_url = resp0.url.split("?")[0].rstrip("/")
+            if not clean_url.endswith(".json"):
+                clean_url += ".json"
+            clean_url += "?limit=10"
+
+            req = urllib.request.Request(
+                clean_url,
+                headers={"User-Agent": "GRID-Hermes/1.0 (intelligence platform)"},
+            )
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                data = json.loads(resp.read(512_000))
+
+            # Reddit returns a list: [post_listing, comments_listing]
+            if not isinstance(data, list) or len(data) < 1:
+                return None
+
+            # Extract post
+            post_data = data[0]["data"]["children"][0]["data"]
+            title = post_data.get("title", "")
+            selftext = post_data.get("selftext", "")
+            author = post_data.get("author", "")
+            subreddit = post_data.get("subreddit", "")
+            score = post_data.get("score", 0)
+            num_comments = post_data.get("num_comments", 0)
+            link_url = post_data.get("url", "")
+
+            sections = [
+                f"[Reddit Post — r/{subreddit}]",
+                f"Title: {title}",
+                f"Author: u/{author} | Score: {score} | Comments: {num_comments}",
+            ]
+
+            if selftext:
+                sections.append(f"Content:\n{selftext[:2000]}")
+
+            if link_url and link_url != url and "reddit.com" not in link_url:
+                sections.append(f"Links to: {link_url}")
+
+            # Extract top comments if available
+            if len(data) > 1:
+                comments = data[1]["data"]["children"]
+                top_comments = []
+                for c in comments[:5]:
+                    if c["kind"] != "t1":
+                        continue
+                    cd = c["data"]
+                    body = cd.get("body", "")[:300]
+                    cscore = cd.get("score", 0)
+                    if body and cscore > 1:
+                        top_comments.append(f"  [{cscore} pts] {body}")
+
+                if top_comments:
+                    sections.append("Top comments:")
+                    sections.extend(top_comments)
+
+            result = "\n".join(sections)
+            log.info(
+                "Hermes resolved reddit: r/{sub} — {t} ({s} pts, {c} comments)",
+                sub=subreddit, t=title[:60], s=score, c=num_comments,
+            )
+            return result[:3000]
+
+        except Exception as exc:
+            log.debug("Reddit fetch failed for {u}: {e}", u=url[:80], e=str(exc))
+            return None
+
+    def _resolve_x_url(self, url: str) -> str | None:
+        """Resolve an X/Twitter URL.
+
+        Twitter blocks direct scraping, so we use multiple strategies:
+        1. Nitter instances (open-source Twitter frontend)
+        2. Perplexity API as fallback (ask it to read the tweet)
+        3. FxTwitter API (returns tweet data as JSON)
+        """
+        import urllib.request
+        import urllib.error
+        from urllib.parse import urlparse
+
+        parsed = urlparse(url)
+        path = parsed.path.strip("/")
+
+        # Extract tweet ID and username from path like "user/status/12345"
+        parts = path.split("/")
+        username = parts[0] if parts else ""
+        tweet_id = ""
+        if "status" in parts:
+            idx = parts.index("status")
+            if idx + 1 < len(parts):
+                tweet_id = parts[idx + 1]
+
+        # Strategy 1: FxTwitter API (most reliable)
+        if tweet_id:
+            try:
+                fx_url = f"https://api.fxtwitter.com/{username}/status/{tweet_id}"
+                req = urllib.request.Request(
+                    fx_url,
+                    headers={"User-Agent": "GRID-Hermes/1.0"},
+                )
+                with urllib.request.urlopen(req, timeout=15) as resp:
+                    data = json.loads(resp.read(256_000))
+
+                tweet = data.get("tweet", {})
+                text = tweet.get("text", "")
+                author_name = tweet.get("author", {}).get("name", username)
+                author_handle = tweet.get("author", {}).get("screen_name", username)
+                likes = tweet.get("likes", 0)
+                retweets = tweet.get("retweets", 0)
+                replies = tweet.get("replies", 0)
+                created = tweet.get("created_at", "")
+
+                # Check for quoted tweet
+                quoted = tweet.get("quote", {})
+                quoted_text = ""
+                if quoted:
+                    qt_author = quoted.get("author", {}).get("screen_name", "?")
+                    qt_text = quoted.get("text", "")
+                    quoted_text = f"\n  Quoting @{qt_author}: {qt_text[:500]}"
+
+                # Check for media
+                media_desc = ""
+                media = tweet.get("media", {})
+                if media and media.get("photos"):
+                    media_desc = f"\n  [{len(media['photos'])} image(s) attached]"
+                if media and media.get("videos"):
+                    media_desc += f"\n  [{len(media['videos'])} video(s) attached]"
+
+                result = (
+                    f"[X/Twitter Post]\n"
+                    f"@{author_handle} ({author_name}) — {created}\n"
+                    f"{text}{quoted_text}{media_desc}\n"
+                    f"Engagement: {likes} likes, {retweets} RTs, {replies} replies"
+                )
+                log.info(
+                    "Hermes resolved X post: @{u} — {l} likes, {rt} RTs",
+                    u=author_handle, l=likes, rt=retweets,
+                )
+                return result[:3000]
+
+            except Exception as exc:
+                log.debug("FxTwitter failed: {e}", e=str(exc))
+
+        # Strategy 2: Ask Perplexity to find the tweet content
+        content = self._query_perplexity(
+            f"Find and summarize the content of this X/Twitter post by @{username}: {url}\n"
+            f"Include: the full tweet text, any key claims or data points, "
+            f"market-relevant information, and engagement metrics if available. "
+            f"If you can't access the specific tweet, summarize what @{username} "
+            f"is known for posting about and any recent notable posts."
+        )
+        if content:
+            return f"[X/Twitter — @{username}]\n{content}"
         return None
 
     def _fetch_url_content(self, url: str) -> str | None:
@@ -372,6 +550,20 @@ class HermesEmailProcessor:
                     log.info("Hermes resolved perplexity link: {u}", u=url[:80])
                     continue
 
+            # Route Reddit links through JSON API
+            if "reddit.com" in domain or "redd.it" in domain:
+                content = self._resolve_reddit_url(url)
+                if content:
+                    sections.append(content)
+                    continue
+
+            # Route X/Twitter links through FxTwitter API + Perplexity fallback
+            if domain in ("twitter.com", "x.com", "www.twitter.com", "www.x.com"):
+                content = self._resolve_x_url(url)
+                if content:
+                    sections.append(content)
+                    continue
+
             # Everything else: direct fetch
             content = self._fetch_url_content(url)
             if content and len(content) > 100:  # skip trivially short pages
@@ -423,7 +615,9 @@ Rules:
 - tickers_mentioned should be uppercase stock/crypto ticker symbols (e.g. SPY, BTC, ETH, AAPL)
 - action_items, notes, and plans can be empty arrays if not applicable
 - summary should be 1-2 concise sentences
-- Include intelligence from BOTH the email text AND any linked content
+- Include intelligence from BOTH the email text AND any linked content (tweets, Reddit posts, Perplexity research, articles)
+- For finance links: extract specific price levels, analyst targets, and insider activity into action_items
+- For social media: note engagement metrics and whether the post is gaining traction
 - Return ONLY the JSON object, nothing else"""
 
     def _parse_llm_response(self, raw: str) -> dict[str, Any] | None:
