@@ -9,7 +9,7 @@ This file coordinates work between AI agents operating on this codebase. Both Cl
 | Agent | Domain | Branch | Status |
 |-------|--------|--------|--------|
 | **Claude Code** | GRID Core, Crucix, grid_app, DerivativesGrid, PWA, all backend | `main` | Active |
-| **Codex** | AstroGrid SPA frontend | `codex/astrogrid` (TBD) | Starting |
+| **Codex** | AstroGrid SPA frontend + `api/routers/astrogrid.py` | `codex/astrogrid-prototype` | Active — branch needs rebase onto main to get scaffold + CODEX.md |
 
 ---
 
@@ -25,9 +25,10 @@ This file coordinates work between AI agents operating on this codebase. Both Cl
 - All config, tests, scripts, deployment
 - This file (AGENTS.md)
 
-### Codex Owns (astrogrid branch)
-- AstroGrid SPA frontend only (`grid/astrogrid/src/`)
+### Codex Owns (codex/astrogrid-prototype branch)
+- AstroGrid SPA frontend (`grid/astrogrid/src/`)
 - AstroGrid package.json, vite.config.js, index.html
+- AstroGrid API router (`grid/api/routers/astrogrid.py`)
 - AstroGrid-specific static assets
 
 ### Shared (coordinate before changing)
@@ -149,3 +150,33 @@ These agents cannot talk to each other directly. The operator routes information
 5. **No new Python dependencies without operator approval.**
 6. **No new npm dependencies over 100KB without operator approval.**
 7. **Test your builds.** `npm run build` must succeed before any commit.
+
+---
+
+## Handoff Log
+
+### 2026-03-26 — Claude Code → Codex (initial handoff)
+
+**Status from Claude Code:**
+- Branch `codex/astrogrid-prototype` is behind `main`. It has 2 commits with unrelated hardening changes (api/main.py, resolver, schema, scheduler) but **zero astrogrid code**.
+- `main` has the AstroGrid scaffold: 7 view stubs, 1 component, store, api client, tokens, vite config, plus `CODEX.md` with full instructions.
+- **Codex must rebase onto main** (`git rebase origin/main`) to get the scaffold and CODEX.md before starting work.
+- The unrelated hardening changes on the branch will likely conflict with main during rebase — those changes are already superseded by work on main. Recommend dropping them (`git rebase origin/main` and resolve by accepting main's versions for non-astrogrid files).
+
+**What exists on main for AstroGrid:**
+- `grid/astrogrid/` — scaffold with 7 view files (Orrery, LunarDashboard, Ephemeris, Correlations, Timeline, Narrative, Settings), NavBar component, store.js, api.js, tokens.js, ephemeris.js, aspects.js
+- `grid/astrogrid/CODEX.md` — full instructions for Codex
+- `grid/api/routers/celestial.py` — existing endpoint: `GET /api/v1/signals/celestial`
+- 5 celestial pullers in `grid/ingestion/celestial/` (lunar, planetary, solar, vedic, chinese) — 23 features, all working
+- `grid/api/routers/astrogrid.py` does NOT exist yet — Codex can create it or request Claude Code to build it
+
+**Recommended first steps for Codex:**
+1. `git rebase origin/main` (drop unrelated hardening commits, accept main's versions)
+2. Read `grid/astrogrid/CODEX.md`
+3. Check which views are stubs vs have real content
+4. Check `grid/astrogrid/src/api.js` route mappings vs actual backend endpoints
+5. Start with Orrery (Three.js 3D solar system) — the hero view
+
+**Blockers:** None. Backend celestial data is live. Auth works. Scaffold builds.
+
+**Next from Claude Code:** Will build `api/routers/astrogrid.py` endpoints on main when Codex requests them via AGENTS.md "Requested Endpoints" section.
