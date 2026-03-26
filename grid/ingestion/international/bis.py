@@ -50,9 +50,9 @@ class BISPuller:
                 result = conn.execute(
                     text(
                         "INSERT INTO source_catalog "
-                        "(name, base_url, license_type, update_frequency, "
-                        "has_vintage_data, revision_policy, data_quality, priority, model_eligible) "
-                        "VALUES (:name, :url, 'FREE', 'QUARTERLY', TRUE, 'RARE', 'HIGH', 12, TRUE) "
+                        "(name, base_url, cost_tier, latency_class, "
+                        "pit_available, revision_behavior, trust_score, priority_rank) "
+                        "VALUES (:name, :url, 'FREE', 'QUARTERLY', TRUE, 'RARE', 'HIGH', 12) "
                         "RETURNING id"
                     ),
                     {"name": "BIS", "url": _BIS_BASE_URL},

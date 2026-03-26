@@ -48,9 +48,9 @@ class MASPuller:
                 result = conn.execute(
                     text(
                         "INSERT INTO source_catalog "
-                        "(name, base_url, license_type, update_frequency, "
-                        "has_vintage_data, revision_policy, data_quality, priority, model_eligible) "
-                        "VALUES (:name, :url, 'FREE', 'MONTHLY', FALSE, 'RARE', 'MED', 20, TRUE) "
+                        "(name, base_url, cost_tier, latency_class, "
+                        "pit_available, revision_behavior, trust_score, priority_rank) "
+                        "VALUES (:name, :url, 'FREE', 'MONTHLY', FALSE, 'RARE', 'MED', 20) "
                         "RETURNING id"
                     ),
                     {"name": "MAS_SG", "url": _MAS_BASE_URL},
