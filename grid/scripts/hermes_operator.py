@@ -1272,19 +1272,51 @@ def run_cycle(state: OperatorState, dry_run: bool = False) -> dict[str, Any]:
             if minutes_since_email >= _cfg.HERMES_EMAIL_CHECK_INTERVAL_MINUTES:
                 log.info("Hermes email check — polling inbox...")
                 if not dry_run:
+                    from sqlalchemy import text as sa_text
                     from alerts.email_ingest import HermesEmailIngest
                     from alerts.email_processor import HermesEmailProcessor
+                    from alerts.email_supervisor import HermesEmailSupervisor
+
                     ingest = HermesEmailIngest(db_engine=engine)
                     new_msgs = ingest.poll()
                     cycle_result["email_ingest"] = {"new_messages": len(new_msgs)}
 
-                    if new_msgs:
+                    # Supervisor triage: spam/note/actionable
+                    supervisor = HermesEmailSupervisor(db_engine=engine)
+                    triage = supervisor.triage_batch()
+                    cycle_result["email_triage"] = triage
+
+                    # Only send actionable emails to LLM
+                    if triage.get("actionable", 0) > 0:
                         processor = HermesEmailProcessor(db_engine=engine)
                         processed_count = processor.process_pending()
                         cycle_result["email_processor"] = {"processed": processed_count}
+
+                        # Execute event triggers on newly processed emails
+                        triggers_fired = 0
+                        with engine.connect() as _tc:
+                            recent = _tc.execute(sa_text(
+                                "SELECT id FROM hermes_inbox "
+                                "WHERE status = 'processed' AND processed_at > NOW() - INTERVAL '1 hour' "
+                                "ORDER BY processed_at DESC LIMIT 20"
+                            )).fetchall()
+                        for (eid,) in recent:
+                            actions = supervisor.execute_triggers(eid)
+                            triggers_fired += len(actions)
+                        cycle_result["email_triggers"] = triggers_fired
+
                         log.info(
-                            "Hermes email: {n} new, {p} processed",
-                            n=len(new_msgs), p=processed_count,
+                            "Hermes email: {n} new, {s} spam, {no} notes, {a} actionable, "
+                            "{p} processed, {t} triggers",
+                            n=len(new_msgs), s=triage.get("spam", 0),
+                            no=triage.get("note", 0), a=triage.get("actionable", 0),
+                            p=processed_count, t=triggers_fired,
+                        )
+                    else:
+                        log.info(
+                            "Hermes email: {n} new, {s} spam, {no} notes, 0 actionable",
+                            n=len(new_msgs), s=triage.get("spam", 0),
+                            no=triage.get("note", 0),
                         )
 
                     state.last_email_check = now_ec
