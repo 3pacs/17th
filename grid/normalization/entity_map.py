@@ -248,6 +248,41 @@ NEW_MAPPINGS_V2: dict[str, str] = {
 
     # Polymarket
     "POLYMARKET:btc": "polymarket_btc",
+
+    # WorldNews sentiment (GDELT-sourced)
+    "wn_geopolitical_article_count": "wn_geopolitical_article_count",
+    "wn_geopolitical_sentiment_avg": "wn_geopolitical_sentiment_avg",
+    "wn_geopolitical_global_spread": "wn_geopolitical_global_spread",
+    "wn_monetary_article_count": "wn_monetary_article_count",
+    "wn_monetary_sentiment_avg": "wn_monetary_sentiment_avg",
+    "wn_monetary_global_spread": "wn_monetary_global_spread",
+    "wn_fiscal_article_count": "wn_fiscal_article_count",
+    "wn_fiscal_sentiment_avg": "wn_fiscal_sentiment_avg",
+    "wn_fiscal_global_spread": "wn_fiscal_global_spread",
+    "wn_energy_article_count": "wn_energy_article_count",
+    "wn_energy_sentiment_avg": "wn_energy_sentiment_avg",
+    "wn_energy_global_spread": "wn_energy_global_spread",
+    "wn_labor_article_count": "wn_labor_article_count",
+    "wn_labor_sentiment_avg": "wn_labor_sentiment_avg",
+    "wn_labor_global_spread": "wn_labor_global_spread",
+    "wn_financial_article_count": "wn_financial_article_count",
+    "wn_financial_sentiment_avg": "wn_financial_sentiment_avg",
+    "wn_financial_global_spread": "wn_financial_global_spread",
+    "wn_technology_article_count": "wn_technology_article_count",
+    "wn_technology_sentiment_avg": "wn_technology_sentiment_avg",
+    "wn_technology_global_spread": "wn_technology_global_spread",
+    "wn_climate_article_count": "wn_climate_article_count",
+    "wn_climate_sentiment_avg": "wn_climate_sentiment_avg",
+    "wn_climate_global_spread": "wn_climate_global_spread",
+    "wn_health_article_count": "wn_health_article_count",
+    "wn_health_sentiment_avg": "wn_health_sentiment_avg",
+    "wn_health_global_spread": "wn_health_global_spread",
+    "wn_trade_article_count": "wn_trade_article_count",
+    "wn_trade_sentiment_avg": "wn_trade_sentiment_avg",
+    "wn_trade_global_spread": "wn_trade_global_spread",
+    "wn_fear_index": "wn_fear_index",
+    "wn_total_volume": "wn_total_volume",
+    "wn_breadth": "wn_breadth",
 }
 
 

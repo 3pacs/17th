@@ -577,7 +577,7 @@ def pull_analyst_ratings(engine):
                             ), {
                                 "sid": sid, "src": source_id, "od": today, "val": value,
                                 "payload": json.dumps({"ticker": ticker, "type": rating_type,
-                                                       "raw": dict(latest) if hasattr(latest, 'items') else str(latest)}),
+                                                       "raw": {k: int(v) if hasattr(v, 'item') else str(v) for k, v in latest.items()} if hasattr(latest, 'items') else str(latest)}, default=str),
                             })
                             results.append({"feature": fname, "value": value, "status": "OK"})
                             log.info("  {f} = {v}", f=fname, v=value)
