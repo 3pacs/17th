@@ -69,3 +69,11 @@
 {"ts": "2026-03-25T20:04:05.619329+00:00", "level": "ERROR", "module": "ingestion.base", "function": "wrapper", "line": 61, "message": "_search_news failed after 3 attempts: 402 Client Error: Payment Required for url: https://api.worldnewsapi.com/search-news?api-key=[REDACTED]", "exception": null}
 {"ts": "2026-03-26T09:00:29.472517+00:00", "level": "ERROR", "module": "ingestion.scheduler", "function": "run_monthly_pulls", "line": 697, "message": "13F pull failed: No module named 'edgar'", "exception": null}
 {"ts": "2026-03-26T09:00:29.953452+00:00", "level": "ERROR", "module": "ingestion.scheduler", "function": "run_monthly_pulls", "line": 697, "message": "13F pull failed: No module named 'edgar'", "exception": null}
+{"ts": "2026-03-26T18:00:05.165723+00:00", "level": "ERROR", "module": "ingestion.fred", "function": "pull_series", "line": 183, "message": "FRED pull failed for DFF: 'date'", "exception": null}
+{"ts": "2026-03-26T18:00:09.598020+00:00", "level": "ERROR", "module": "ingestion.fred", "function": "pull_series", "line": 183, "message": "FRED pull failed for USSLIND: 'date'", "exception": null}
+{"ts": "2026-03-26T18:00:12.417807+00:00", "level": "ERROR", "module": "ingestion.fred", "function": "pull_series", "line": 183, "message": "FRED pull failed for CPIAUCSL: 'date'", "exception": null}
+{"ts": "2026-03-26T18:00:19.247211+00:00", "level": "ERROR", "module": "ingestion.fred", "function": "pull_series", "line": 183, "message": "FRED pull failed for MANEMP: 'date'", "exception": null}
+{"ts": "2026-03-26T18:00:23.021032+00:00", "level": "ERROR", "module": "ingestion.fred", "function": "pull_series", "line": 183, "message": "FRED pull failed for UNRATE: 'date'", "exception": null}
+{"ts": "2026-03-26T18:00:24.350590+00:00", "level": "ERROR", "module": "ingestion.fred", "function": "pull_series", "line": 183, "message": "FRED pull failed for HOUST: 'date'", "exception": null}
+{"ts": "2026-03-26T18:00:32.217777+00:00", "level": "ERROR", "module": "ingestion.fred", "function": "pull_series", "line": 183, "message": "FRED pull failed for DSPIC96: 'date'", "exception": null}
+{"ts": "2026-03-26T18:00:35.017746+00:00", "level": "ERROR", "module": "ingestion.fred", "function": "pull_series", "line": 183, "message": "FRED pull failed for DFF: 'date'", "exception": null}
