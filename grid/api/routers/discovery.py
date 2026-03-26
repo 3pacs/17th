@@ -476,3 +476,140 @@ async def smart_heatmap(
         "orthogonal_only": orthogonal_only,
         "family_filter": family,
     }
+
+
+@router.get("/feature-network")
+async def feature_network(
+    family: str | None = Query(default=None, description="Filter by feature family"),
+    min_correlation: float = Query(default=0.3, ge=0.0, le=1.0),
+    max_nodes: int = Query(default=50, ge=5, le=200),
+    _token: str = Depends(require_auth),
+) -> dict:
+    """Return feature correlation network as nodes + links for ForceNetwork viz.
+
+    Builds a graph where nodes are features (sized by importance, colored by
+    family) and links are correlations above the minimum threshold. Nodes are
+    filtered to the top N by importance to keep the graph readable.
+    """
+    import numpy as np
+
+    engine = get_db_engine()
+    pit_store = get_pit_store()
+
+    # Load model-eligible features
+    with engine.connect() as conn:
+        feat_rows = conn.execute(text(
+            "SELECT id, name, family FROM feature_registry "
+            "WHERE model_eligible = TRUE ORDER BY id"
+        )).fetchall()
+
+    if not feat_rows:
+        return {"nodes": [], "links": []}
+
+    all_ids = [r[0] for r in feat_rows]
+    id_to_name = {r[0]: r[1] for r in feat_rows}
+    id_to_family = {r[0]: r[2] or "other" for r in feat_rows}
+
+    # Get feature importance from feature_importance_log (latest run)
+    importance_map: dict[str, float] = {}
+    try:
+        with engine.connect() as conn:
+            imp_rows = conn.execute(text(
+                "SELECT feature_name, importance "
+                "FROM feature_importance_log "
+                "WHERE run_id = (SELECT MAX(run_id) FROM feature_importance_log) "
+                "ORDER BY importance DESC"
+            )).fetchall()
+            for r in imp_rows:
+                importance_map[r[0]] = float(r[1])
+    except Exception as exc:
+        log.debug("Feature importance log unavailable: {e}", e=str(exc))
+
+    # Build feature matrix from PIT store
+    try:
+        df = pit_store.get_feature_matrix(feature_ids=all_ids, as_of_date=None)
+    except Exception as exc:
+        log.warning("Feature matrix retrieval failed: {e}", e=str(exc))
+        return {"nodes": [], "links": []}
+
+    if df is None or df.empty or df.shape[1] < 2:
+        return {"nodes": [], "links": []}
+
+    # Filter by family if specified
+    if family:
+        family_ids = {fid for fid in all_ids if id_to_family.get(fid) == family}
+        keep_cols = [c for c in df.columns if c in family_ids]
+        if not keep_cols:
+            return {"nodes": [], "links": []}
+        df = df[keep_cols]
+
+    # Compute z-scores for current snapshot
+    z_scores: dict[str, float] = {}
+    if len(df) > 20:
+        mean_vals = df.mean()
+        std_vals = df.std().replace(0, 1)
+        last_row = df.ffill().iloc[-1]
+        for col in df.columns:
+            name = id_to_name.get(col, str(col))
+            z = (last_row[col] - mean_vals[col]) / std_vals[col]
+            if z == z:  # not NaN
+                z_scores[name] = round(float(z), 3)
+
+    # Build nodes with importance, filter to top max_nodes
+    node_list = []
+    for fid in df.columns:
+        name = id_to_name.get(fid, str(fid))
+        imp = importance_map.get(name, 0.0)
+        node_list.append({
+            "id": name,
+            "name": name,
+            "importance": round(imp, 4),
+            "family": id_to_family.get(fid, "other"),
+            "z_score": z_scores.get(name, 0.0),
+            "_fid": fid,
+        })
+
+    # Sort by importance descending, take top max_nodes
+    node_list.sort(key=lambda n: n["importance"], reverse=True)
+    # If no importance data, keep all (up to max_nodes)
+    node_list = node_list[:max_nodes]
+    selected_fids = {n["_fid"] for n in node_list}
+    selected_names = {n["id"] for n in node_list}
+
+    # Remove internal field
+    for n in node_list:
+        del n["_fid"]
+
+    # Compute correlation matrix for selected features only
+    selected_df = df[[c for c in df.columns if c in selected_fids]]
+    if selected_df.shape[1] < 2:
+        return {"nodes": node_list, "links": []}
+
+    corr = selected_df.corr()
+
+    # Build links for pairs above min_correlation
+    links = []
+    col_list = list(corr.columns)
+    for i in range(len(col_list)):
+        for j in range(i + 1, len(col_list)):
+            c = corr.iloc[i, j]
+            if c != c:  # NaN
+                continue
+            if abs(c) < min_correlation:
+                continue
+            src = id_to_name.get(col_list[i], str(col_list[i]))
+            tgt = id_to_name.get(col_list[j], str(col_list[j]))
+            if src in selected_names and tgt in selected_names:
+                links.append({
+                    "source": src,
+                    "target": tgt,
+                    "weight": round(float(c), 4),
+                })
+
+    log.info(
+        "Feature network: {n} nodes, {l} links (min_corr={mc})",
+        n=len(node_list),
+        l=len(links),
+        mc=min_correlation,
+    )
+    return {"nodes": node_list, "links": links}

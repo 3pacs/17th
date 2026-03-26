@@ -81,6 +81,14 @@ cd grid && python -m pytest tests/test_api.py -v   # API tests
 - Keep API routes thin; business logic belongs in domain modules
 - Every new module needs a test file in `grid/tests/`
 
+## Multi-Agent Collaboration
+
+This repo has multiple AI agents working on it. See `AGENTS.md` for the full coordination protocol.
+- **Claude Code**: owns main branch (backend, PWA, DerivativesGrid, Crucix, grid_app)
+- **Codex**: owns AstroGrid SPA frontend on `codex/astrogrid` branch
+- **Do not modify** `grid/astrogrid/src/` on main — Codex owns that code
+- **API contract** for AstroGrid endpoints is in AGENTS.md — update it if you change celestial endpoints
+
 ## Workflow Best Practices
 
 - Start complex tasks in **plan mode** before execution

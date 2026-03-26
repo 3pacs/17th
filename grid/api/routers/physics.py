@@ -451,3 +451,122 @@ async def physics_dashboard(
         "energy_conservation": conservation,
         "summary": " ".join(summary_parts),
     }
+
+
+@router.get("/energy-trajectory")
+async def energy_trajectory(
+    days: int = Query(default=90, ge=14, le=730),
+    feature: str = Query(default="sp500", description="Feature to compute energy for"),
+    as_of: str | None = Query(default=None),
+) -> dict[str, Any]:
+    """Return time series of kinetic/potential/total energy for ParticleSystem viz.
+
+    Computes daily energy decomposition for a feature and joins regime state
+    from decision_journal for coloring.
+    """
+    from db import get_engine
+    from features.lab import FeatureLab
+    from physics.transforms import kinetic_energy as ke_fn, potential_energy as pe_fn
+    from store.pit import PITStore
+
+    try:
+        as_of_date = date.fromisoformat(as_of) if as_of else date.today()
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid date format '{as_of}'. Use ISO format: YYYY-MM-DD",
+        )
+
+    engine = get_engine()
+    pit = PITStore(engine)
+    lab = FeatureLab(engine, pit)
+
+    # Need extra lookback for rolling windows (252 for PE)
+    series = lab._get_pit_series(feature, as_of_date, lookback_days=days + 300)
+    if series is None or len(series) < 50:
+        return {"trajectory": []}
+
+    # Compute KE and PE
+    ke = ke_fn(series, window=21)
+    pe = pe_fn(series, window=252)
+
+    # Trim to requested date range
+    from datetime import timedelta
+
+    cutoff = as_of_date - timedelta(days=days)
+    ke = ke.loc[ke.index >= str(cutoff)] if not ke.empty else ke
+    pe = pe.loc[pe.index >= str(cutoff)] if not pe.empty else pe
+
+    # Align on common dates
+    common = ke.dropna().index.intersection(pe.dropna().index)
+    if len(common) == 0:
+        return {"trajectory": []}
+
+    ke = ke.loc[common]
+    pe = pe.loc[common]
+
+    # Compute momentum (rolling 21-day slope of the feature)
+    import numpy as np
+
+    momentum_series = series.pct_change(periods=21).reindex(common).fillna(0)
+
+    # Get regime history from decision_journal
+    regime_map: dict[str, str] = {}
+    with engine.connect() as conn:
+        from sqlalchemy import text as sa_text
+
+        regime_rows = conn.execute(
+            sa_text(
+                "SELECT DATE(decision_timestamp) AS dt, inferred_state "
+                "FROM decision_journal "
+                "WHERE decision_timestamp >= NOW() - make_interval(days => :days) "
+                "ORDER BY decision_timestamp"
+            ),
+            {"days": days + 30},
+        ).fetchall()
+    for row in regime_rows:
+        regime_map[str(row[0])] = row[1]
+
+    sorted_regime_dates = sorted(regime_map.keys())
+
+    # Build trajectory
+    trajectory = []
+    for idx_date in common:
+        dt_str = str(idx_date.date()) if hasattr(idx_date, "date") else str(idx_date)
+        ke_val = float(ke.loc[idx_date])
+        pe_val = float(pe.loc[idx_date])
+
+        if ke_val != ke_val:
+            ke_val = 0.0
+        if pe_val != pe_val:
+            pe_val = 0.0
+
+        # Find regime for this date
+        regime = "NEUTRAL"
+        if dt_str in regime_map:
+            regime = regime_map[dt_str]
+        else:
+            for rd in reversed(sorted_regime_dates):
+                if rd <= dt_str:
+                    regime = regime_map[rd]
+                    break
+
+        mom_val = float(momentum_series.loc[idx_date]) if idx_date in momentum_series.index else 0.0
+        if mom_val != mom_val:
+            mom_val = 0.0
+
+        trajectory.append({
+            "date": dt_str,
+            "kinetic_energy": round(ke_val, 6),
+            "potential_energy": round(pe_val, 6),
+            "total_energy": round(ke_val + pe_val, 6),
+            "momentum": round(mom_val, 6),
+            "regime": regime,
+        })
+
+    log.info(
+        "Energy trajectory: {n} points for {f}",
+        n=len(trajectory),
+        f=feature,
+    )
+    return {"trajectory": trajectory}

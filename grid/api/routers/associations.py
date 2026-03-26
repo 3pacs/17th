@@ -661,3 +661,191 @@ async def get_anomalies(
             pass
 
     return {"anomalies": anomalies, "threshold": sigma_threshold}
+
+
+@router.get("/lead-lag-river")
+async def lead_lag_river(
+    min_correlation: float = Query(default=0.3, ge=0.0, le=1.0),
+    max_pairs: int = Query(default=20, ge=1, le=100),
+    _token: str = Depends(require_auth),
+) -> dict:
+    """Return lead-lag relationships formatted for RiverFlow visualization.
+
+    Sources data from hypothesis_registry (PASSED/TESTING hypotheses with
+    lag structure) and enriches with family metadata. Falls back to computing
+    lagged correlations for top feature pairs if no hypotheses are available.
+    """
+    import json as _json
+
+    engine = get_db_engine()
+
+    # Get feature registry for family lookups
+    registry = _get_feature_registry(engine)
+    name_to_family = dict(zip(registry["name"], registry["family"]))
+
+    streams: list[dict] = []
+
+    # Strategy 1: Pull from hypothesis_registry (PASSED/TESTING with lag structure)
+    try:
+        with engine.connect() as conn:
+            hyp_rows = conn.execute(
+                text(
+                    "SELECT h.id, h.statement, h.state, h.lag_structure, h.kill_reason "
+                    "FROM hypothesis_registry h "
+                    "WHERE h.state IN ('PASSED', 'TESTING') "
+                    "AND h.lag_structure IS NOT NULL "
+                    "ORDER BY h.updated_at DESC NULLS LAST "
+                    "LIMIT :lim"
+                ),
+                {"lim": max_pairs * 3},
+            ).fetchall()
+
+        for row in hyp_rows:
+            lag_struct = row[3]
+            kill_reason = row[4] or ""
+
+            if isinstance(lag_struct, str):
+                try:
+                    lag_struct = _json.loads(lag_struct)
+                except (ValueError, TypeError):
+                    continue
+            if not isinstance(lag_struct, dict):
+                continue
+
+            leader_features = lag_struct.get("leader_features", [])
+            follower_features = lag_struct.get("follower_features", [])
+            expected_lag = lag_struct.get("expected_lag", 3)
+
+            if not leader_features or not follower_features:
+                continue
+
+            leader = leader_features[0] if leader_features else ""
+            follower = follower_features[0] if follower_features else ""
+
+            # Extract correlation from kill_reason if available
+            correlation = 0.0
+            if "r=" in kill_reason:
+                try:
+                    r_part = kill_reason.split("r=")[1].split(",")[0].split(")")[0]
+                    correlation = float(r_part)
+                except (ValueError, IndexError):
+                    pass
+            elif "Correlation" in kill_reason:
+                try:
+                    c_part = kill_reason.split("Correlation")[1].strip().split(" ")[0]
+                    correlation = float(c_part)
+                except (ValueError, IndexError):
+                    pass
+
+            # Extract optimal lag from kill_reason if available
+            lag_days = expected_lag
+            if "optimal_lag=" in kill_reason:
+                try:
+                    lag_days = int(kill_reason.split("optimal_lag=")[1].split(",")[0])
+                except (ValueError, IndexError):
+                    pass
+
+            if abs(correlation) < min_correlation:
+                continue
+
+            leader_family = name_to_family.get(leader, "other")
+            follower_family = name_to_family.get(follower, "other")
+
+            streams.append({
+                "leader": leader,
+                "follower": follower,
+                "lag_days": max(1, lag_days),
+                "correlation": round(abs(correlation), 4),
+                "leader_family": leader_family or "other",
+                "follower_family": follower_family or "other",
+                "direction": "positive" if correlation >= 0 else "negative",
+            })
+    except Exception as exc:
+        log.warning("Hypothesis-based lead-lag query failed: {e}", e=str(exc))
+
+    # Strategy 2: If we didn't get enough from hypotheses, compute from top features
+    if len(streams) < max_pairs:
+        try:
+            from analysis.hypothesis_tester import (
+                _get_feature_series,
+                compute_lagged_correlation,
+            )
+
+            # Get top features by importance or just use regime-weighted ones
+            with engine.connect() as conn:
+                top_feats = conn.execute(
+                    text(
+                        "SELECT name, family FROM feature_registry "
+                        "WHERE model_eligible = TRUE "
+                        "ORDER BY id LIMIT 30"
+                    )
+                ).fetchall()
+
+            feat_names = [r[0] for r in top_feats]
+            feat_families = {r[0]: r[1] or "other" for r in top_feats}
+
+            # Compute pairwise lagged correlations for a sample of pairs
+            existing_pairs = {(s["leader"], s["follower"]) for s in streams}
+            computed = 0
+            max_compute = min(max_pairs - len(streams), 15)  # limit computation
+
+            for i in range(len(feat_names)):
+                if computed >= max_compute:
+                    break
+                for j in range(i + 1, len(feat_names)):
+                    if computed >= max_compute:
+                        break
+                    fa, fb = feat_names[i], feat_names[j]
+                    if (fa, fb) in existing_pairs or (fb, fa) in existing_pairs:
+                        continue
+                    # Skip same-family pairs (less interesting)
+                    if feat_families.get(fa) == feat_families.get(fb):
+                        continue
+
+                    sa = _get_feature_series(engine, fa, days=504)
+                    sb = _get_feature_series(engine, fb, days=504)
+                    if sa is None or sb is None or len(sa) < 60 or len(sb) < 60:
+                        continue
+
+                    result = compute_lagged_correlation(sa, sb, max_lag=10)
+                    opt_corr = result.get("optimal_correlation", 0.0)
+                    opt_lag = result.get("optimal_lag", 0)
+
+                    if abs(opt_corr) < min_correlation or opt_lag == 0:
+                        continue
+
+                    leader = fa if opt_lag > 0 else fb
+                    follower = fb if opt_lag > 0 else fa
+
+                    streams.append({
+                        "leader": leader,
+                        "follower": follower,
+                        "lag_days": abs(opt_lag),
+                        "correlation": round(abs(opt_corr), 4),
+                        "leader_family": feat_families.get(leader, "other"),
+                        "follower_family": feat_families.get(follower, "other"),
+                        "direction": "positive" if opt_corr >= 0 else "negative",
+                    })
+                    computed += 1
+        except Exception as exc:
+            log.warning("Computed lead-lag analysis failed: {e}", e=str(exc))
+
+    # Sort by correlation strength descending, take top max_pairs
+    streams.sort(key=lambda s: s["correlation"], reverse=True)
+    streams = streams[:max_pairs]
+
+    # Deduplicate (same leader+follower pair)
+    seen = set()
+    unique_streams = []
+    for s in streams:
+        key = (s["leader"], s["follower"])
+        if key not in seen:
+            seen.add(key)
+            unique_streams.append(s)
+
+    log.info(
+        "Lead-lag river: {n} streams (min_corr={mc})",
+        n=len(unique_streams),
+        mc=min_correlation,
+    )
+    return {"streams": unique_streams}

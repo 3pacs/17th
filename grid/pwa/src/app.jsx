@@ -24,6 +24,7 @@ import AssociationsLegacy from './views/AssociationsLegacy.jsx';
 import Settings from './views/Settings.jsx';
 import Strategy from './views/Strategy.jsx';
 import Options from './views/Options.jsx';
+import Derivatives from './views/Derivatives.jsx';
 import Heatmap from './views/Heatmap.jsx';
 import Flows from './views/Flows.jsx';
 import WeightSliders from './views/WeightSliders.jsx';
@@ -31,6 +32,7 @@ import Knowledge from './views/Knowledge.jsx';
 import WatchlistAnalysis from './views/WatchlistAnalysis.jsx';
 import Operator from './views/Operator.jsx';
 import Snapshots from './views/Snapshots.jsx';
+import VizDashboard from './views/VizDashboard.jsx';
 
 const styles = {
     app: {
@@ -129,6 +131,7 @@ function App() {
             case 'system': return <SystemLogs />;
             case 'backtest': return <Backtest />;
             case 'options': return <Options />;
+            case 'derivatives': return <Derivatives />;
             case 'heatmap': return <Heatmap />;
             case 'flows': return <Flows />;
             case 'weights': return <WeightSliders />;
@@ -137,6 +140,7 @@ function App() {
             case 'watchlist': return <WatchlistAnalysis />;
             case 'operator': return <Operator />;
             case 'snapshots': return <Snapshots />;
+            case 'viz-dashboard': return <VizDashboard />;
             case 'settings': return <Settings onLogout={() => { clearAuth(); }} />;
             default: return <Dashboard onNavigate={navigate} />;
         }

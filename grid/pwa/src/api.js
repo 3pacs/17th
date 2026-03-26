@@ -280,9 +280,43 @@ class GRIDApi {
         return this._fetch(`/api/v1/options/history?${params}`);
     }
 
+    // Derivatives vol surface
+    async getVolSurface(ticker) {
+        return this._fetch(`/api/v1/derivatives/vol-surface/${encodeURIComponent(ticker)}`);
+    }
+    async getSviSurface(ticker) {
+        return this._fetch(`/api/v1/derivatives/svi-surface/${encodeURIComponent(ticker)}`);
+    }
+    async getSkew(ticker) {
+        return this._fetch(`/api/v1/derivatives/skew/${encodeURIComponent(ticker)}`);
+    }
+    async getTermStructure(ticker) {
+        return this._fetch(`/api/v1/derivatives/term-structure/${encodeURIComponent(ticker)}`);
+    }
+    async getGexProfile(ticker) {
+        return this._fetch(`/api/v1/derivatives/gex/${encodeURIComponent(ticker)}`);
+    }
+
     // Physics — news momentum
     async getNewsMomentum(lookbackDays = 63) {
         return this._fetch(`/api/v1/physics/momentum?lookback_days=${lookbackDays}`);
+    }
+
+    // VizDashboard — Living Intelligence data endpoints
+    async getRegimeTrajectory(days = 365) {
+        return this._fetch(`/api/v1/regime/trajectory?days=${days}`);
+    }
+    async getOrbitalData(period = '6M', interval = 'weekly') {
+        return this._fetch(`/api/v1/flows/orbital-data?period=${encodeURIComponent(period)}&interval=${encodeURIComponent(interval)}`);
+    }
+    async getFeatureNetwork(minCorrelation = 0.3, maxNodes = 50) {
+        return this._fetch(`/api/v1/discovery/feature-network?min_correlation=${minCorrelation}&max_nodes=${maxNodes}`);
+    }
+    async getEnergyTrajectory(days = 90) {
+        return this._fetch(`/api/v1/physics/energy-trajectory?days=${days}`);
+    }
+    async getLeadLagRiver(minCorrelation = 0.3, maxPairs = 20) {
+        return this._fetch(`/api/v1/associations/lead-lag-river?min_correlation=${minCorrelation}&max_pairs=${maxPairs}`);
     }
 
     // Features

@@ -444,3 +444,164 @@ async def get_transitions(
             )
 
     return RegimeTransitionsResponse(transitions=transitions)
+
+
+# ── Regime trajectory (PCA projection) ──────────────────────────
+
+
+_trajectory_cache: dict[str, tuple[float, dict]] = {}
+
+
+@router.get("/trajectory")
+async def get_trajectory(
+    days: int = Query(default=365, ge=30, le=1000),
+    _token: str = Depends(require_auth),
+) -> dict:
+    """Return PCA-projected regime trajectory for phase-space visualization.
+
+    Projects the regime-weighted feature matrix onto 2 principal components
+    and joins regime state from decision_journal for each date.
+    Result is cached for 1 hour.
+    """
+    import time
+
+    cache_key = f"trajectory_{days}"
+    now = time.time()
+    if cache_key in _trajectory_cache:
+        cached_at, cached_result = _trajectory_cache[cache_key]
+        if now - cached_at < 3600:
+            log.debug("Returning cached trajectory (age {a:.0f}s)", a=now - cached_at)
+            return cached_result
+
+    import numpy as np
+    from scripts.auto_regime import DEFAULT_FEATURE_WEIGHTS
+    from store.pit import PITStore
+
+    engine = get_db_engine()
+    pit = PITStore(engine)
+
+    # Resolve feature IDs for regime-weighted features
+    feature_names_list = list(DEFAULT_FEATURE_WEIGHTS.keys())
+    with engine.connect() as conn:
+        feat_rows = conn.execute(
+            text(
+                "SELECT id, name FROM feature_registry "
+                "WHERE model_eligible = TRUE AND name = ANY(:names)"
+            ),
+            {"names": feature_names_list},
+        ).fetchall()
+
+    if len(feat_rows) < 3:
+        return {"trajectory": [], "explained_variance": [], "feature_loadings": {}}
+
+    fids = [r[0] for r in feat_rows]
+    fid_to_name = {r[0]: r[1] for r in feat_rows}
+
+    # Build feature matrix
+    from datetime import timedelta
+
+    today = date.today()
+    df = pit.get_feature_matrix(fids, today - timedelta(days=days + 252), today, today)
+    if df.empty or len(df) < 30:
+        return {"trajectory": [], "explained_variance": [], "feature_loadings": {}}
+
+    df = df.ffill().bfill().dropna(axis=1, how="all").dropna()
+    if df.empty or df.shape[1] < 2:
+        return {"trajectory": [], "explained_variance": [], "feature_loadings": {}}
+
+    # Rename columns to feature names
+    col_names = [fid_to_name.get(c, str(c)) for c in df.columns]
+    df.columns = col_names
+
+    # Z-score the matrix
+    means = df.mean()
+    stds = df.std().replace(0, 1)
+    z_matrix = (df - means) / stds
+
+    # PCA with 2 components
+    from sklearn.decomposition import PCA
+
+    pca = PCA(n_components=2)
+    components = pca.fit_transform(z_matrix.values)
+
+    # Get regime history from decision_journal
+    regime_map: dict[str, tuple[str, float, float | None]] = {}
+    with engine.connect() as conn:
+        regime_rows = conn.execute(
+            text(
+                "SELECT DATE(decision_timestamp) AS dt, "
+                "inferred_state, state_confidence, counterfactual "
+                "FROM decision_journal "
+                "WHERE decision_timestamp >= NOW() - make_interval(days => :days) "
+                "ORDER BY decision_timestamp"
+            ),
+            {"days": days},
+        ).fetchall()
+
+    for row in regime_rows:
+        dt_str = str(row[0])
+        cf = row[3] or ""
+        stress = None
+        if "S=" in cf:
+            try:
+                stress = float(cf.split("S=")[1].split(",")[0])
+            except (ValueError, IndexError):
+                pass
+        regime_map[dt_str] = (row[1], float(row[2]) if row[2] else 0.0, stress)
+
+    # Build trajectory, matching each date to nearest prior regime
+    trajectory = []
+    sorted_regime_dates = sorted(regime_map.keys())
+    dates = z_matrix.index
+
+    for i, idx_date in enumerate(dates):
+        dt_str = str(idx_date.date()) if hasattr(idx_date, "date") else str(idx_date)
+
+        # Find nearest prior regime entry
+        regime_state = "NEUTRAL"
+        confidence = 0.0
+        stress_index = 0.0
+        if dt_str in regime_map:
+            regime_state, confidence, si = regime_map[dt_str]
+            stress_index = si if si is not None else 0.0
+        else:
+            # Find most recent prior entry
+            for rd in reversed(sorted_regime_dates):
+                if rd <= dt_str:
+                    regime_state, confidence, si = regime_map[rd]
+                    stress_index = si if si is not None else 0.0
+                    break
+
+        trajectory.append({
+            "date": dt_str,
+            "pc1": round(float(components[i, 0]), 4),
+            "pc2": round(float(components[i, 1]), 4),
+            "regime_state": regime_state,
+            "confidence": round(confidence, 4),
+            "stress_index": round(stress_index, 4),
+        })
+
+    # Feature loadings
+    feature_loadings = {}
+    for j, fname in enumerate(col_names):
+        feature_loadings[fname] = [
+            round(float(pca.components_[0, j]), 4),
+            round(float(pca.components_[1, j]), 4),
+        ]
+
+    explained = [round(float(v), 4) for v in pca.explained_variance_ratio_]
+
+    result = {
+        "trajectory": trajectory,
+        "explained_variance": explained,
+        "feature_loadings": feature_loadings,
+    }
+
+    _trajectory_cache[cache_key] = (now, result)
+    log.info(
+        "Built regime trajectory: {n} points, {f} features, variance explained {v}",
+        n=len(trajectory),
+        f=len(col_names),
+        v=explained,
+    )
+    return result

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from loguru import logger as log
 from sqlalchemy import text
 
@@ -769,3 +769,208 @@ async def test_hypotheses(_token: str = Depends(require_auth)) -> dict[str, Any]
     from analysis.hypothesis_tester import run_all_tests
     engine = get_db_engine()
     return run_all_tests(engine)
+
+
+# ── Sector ETF name mapping for orbital viz ─────────────────────
+_SECTOR_ETF_NAMES = {
+    "XLK": "Technology",
+    "XLF": "Financials",
+    "XLE": "Energy",
+    "XLV": "Healthcare",
+    "XLY": "Consumer Discretionary",
+    "XLP": "Consumer Staples",
+    "XLI": "Industrials",
+    "XLB": "Materials",
+    "XLRE": "Real Estate",
+    "XLU": "Utilities",
+    "XLC": "Communication Services",
+}
+
+_PERIOD_DAYS = {
+    "1M": 30, "3M": 90, "6M": 180, "1Y": 365, "2Y": 730,
+}
+
+
+@router.get("/orbital-data")
+async def get_orbital_data(
+    period: str = Query(default="6M", description="Lookback period (1M, 3M, 6M, 1Y, 2Y)"),
+    interval: str = Query(default="weekly", description="Snapshot interval (daily, weekly, monthly)"),
+    _token: str = Depends(require_auth),
+) -> dict[str, Any]:
+    """Return sector ETF orbital data for the Orbital renderer.
+
+    Computes relative strength (30-day rolling return minus SPY) for each
+    of the 11 sector ETFs at the requested interval, packaged as time-
+    stamped snapshots.
+    """
+    from datetime import date, timedelta
+
+    import numpy as np
+
+    engine = get_db_engine()
+
+    days = _PERIOD_DAYS.get(period, 180)
+    today = date.today()
+    start = today - timedelta(days=days + 60)  # extra lookback for rolling calc
+
+    # Resolve feature IDs for SPY + sector ETFs
+    etf_tickers = ["SPY"] + list(_SECTOR_ETF_NAMES.keys())
+    # Features are stored as lowercase + _full (e.g., spy_full, xlk_full)
+    feature_names = [f"{t.lower()}_full" for t in etf_tickers]
+
+    with engine.connect() as conn:
+        feat_rows = conn.execute(
+            text(
+                "SELECT id, name FROM feature_registry "
+                "WHERE name = ANY(:names)"
+            ),
+            {"names": feature_names},
+        ).fetchall()
+
+    name_to_id = {r[1]: r[0] for r in feat_rows}
+    found_ids = [r[0] for r in feat_rows]
+
+    if not found_ids or "spy_full" not in name_to_id:
+        # Fallback: try without _full suffix
+        feature_names_alt = [t.lower() for t in etf_tickers]
+        with engine.connect() as conn:
+            feat_rows = conn.execute(
+                text(
+                    "SELECT id, name FROM feature_registry "
+                    "WHERE name = ANY(:names)"
+                ),
+                {"names": feature_names_alt},
+            ).fetchall()
+        name_to_id = {r[1]: r[0] for r in feat_rows}
+        found_ids = [r[0] for r in feat_rows]
+
+    if not found_ids:
+        return {"center": {"name": "SPY", "price": None}, "snapshots": []}
+
+    # Pull price data from resolved_series
+    price_data: dict[str, list[tuple[date, float]]] = {}
+    with engine.connect() as conn:
+        for fname, fid in name_to_id.items():
+            rows = conn.execute(
+                text(
+                    "SELECT DISTINCT ON (obs_date) obs_date, value "
+                    "FROM resolved_series "
+                    "WHERE feature_id = :fid AND obs_date >= :start AND obs_date <= :end "
+                    "ORDER BY obs_date, vintage_date DESC"
+                ),
+                {"fid": fid, "start": start, "end": today},
+            ).fetchall()
+            price_data[fname] = [(r[0], float(r[1])) for r in rows if r[1] is not None]
+
+    # Find SPY data
+    spy_key = None
+    for k in price_data:
+        if "spy" in k:
+            spy_key = k
+            break
+
+    if not spy_key or len(price_data[spy_key]) < 30:
+        return {"center": {"name": "SPY", "price": None}, "snapshots": []}
+
+    # Convert to pandas Series for rolling calculations
+    import pandas as pd
+
+    spy_series = pd.Series(
+        {d: v for d, v in price_data[spy_key]},
+    ).sort_index()
+
+    # SPY 30-day rolling return
+    spy_return_30d = spy_series.pct_change(periods=30)
+
+    # Get latest SPY price
+    spy_price = round(float(spy_series.iloc[-1]), 2) if not spy_series.empty else None
+
+    # Build sector series and compute relative strength
+    sector_returns: dict[str, pd.Series] = {}
+    for ticker in _SECTOR_ETF_NAMES:
+        for suffix in [f"{ticker.lower()}_full", ticker.lower()]:
+            if suffix in price_data and len(price_data[suffix]) >= 30:
+                s = pd.Series({d: v for d, v in price_data[suffix]}).sort_index()
+                ret_30d = s.pct_change(periods=30)
+                # Relative strength = sector return - SPY return
+                common = ret_30d.index.intersection(spy_return_30d.index)
+                if len(common) > 0:
+                    rel = ret_30d.loc[common] - spy_return_30d.loc[common]
+                    sector_returns[ticker] = rel
+                break
+
+    if not sector_returns:
+        return {"center": {"name": "SPY", "price": spy_price}, "snapshots": []}
+
+    # Determine snapshot dates based on interval
+    # Get all dates where we have data, filter by interval
+    all_dates = sorted(spy_return_30d.dropna().index)
+    # Only keep dates within the requested period
+    cutoff = today - timedelta(days=days)
+    all_dates = [d for d in all_dates if d >= cutoff]
+
+    if interval == "monthly":
+        # Pick roughly one date per month
+        snapshot_dates = []
+        last_month = None
+        for d in all_dates:
+            m = d.month if hasattr(d, "month") else None
+            if m is not None and m != last_month:
+                snapshot_dates.append(d)
+                last_month = m
+    elif interval == "weekly":
+        snapshot_dates = all_dates[::5]  # every ~5 trading days
+    else:
+        snapshot_dates = all_dates
+
+    # Also get volume data (best effort)
+    volume_data: dict[str, dict] = {}
+    try:
+        vol_names = [f"{t.lower()}_volume" for t in _SECTOR_ETF_NAMES]
+        with engine.connect() as conn:
+            vol_rows = conn.execute(
+                text(
+                    "SELECT fr.name, rs.value FROM resolved_series rs "
+                    "JOIN feature_registry fr ON fr.id = rs.feature_id "
+                    "WHERE fr.name = ANY(:names) "
+                    "AND rs.obs_date = (SELECT MAX(obs_date) FROM resolved_series "
+                    "                   WHERE feature_id = rs.feature_id)"
+                ),
+                {"names": vol_names},
+            ).fetchall()
+            for r in vol_rows:
+                ticker = r[0].replace("_volume", "").upper()
+                volume_data[ticker] = float(r[1]) if r[1] else 0
+    except Exception:
+        pass
+
+    # Build snapshots
+    snapshots = []
+    for snap_date in snapshot_dates:
+        sectors = {}
+        for ticker, rel_series in sector_returns.items():
+            if snap_date in rel_series.index:
+                rs_val = float(rel_series.loc[snap_date])
+                if rs_val != rs_val:  # NaN
+                    continue
+                sectors[ticker] = {
+                    "relative_strength": round(rs_val * 100, 2),  # as percentage
+                    "volume": volume_data.get(ticker, 0),
+                    "etf": ticker,
+                    "name": _SECTOR_ETF_NAMES.get(ticker, ticker),
+                }
+        if sectors:
+            dt_str = str(snap_date.date()) if hasattr(snap_date, "date") else str(snap_date)
+            snapshots.append({"date": dt_str, "sectors": sectors})
+
+    log.info(
+        "Orbital data: {s} snapshots, {sec} sectors, period={p}",
+        s=len(snapshots),
+        sec=len(sector_returns),
+        p=period,
+    )
+
+    return {
+        "center": {"name": "SPY", "price": spy_price},
+        "snapshots": snapshots,
+    }

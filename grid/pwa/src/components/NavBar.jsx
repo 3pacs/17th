@@ -19,10 +19,12 @@ const menuSections = [
     {
         label: 'INTELLIGENCE',
         items: [
+            { id: 'viz-dashboard', icon: Activity, label: 'Living Intel', desc: 'Real-time multi-chart intelligence' },
             { id: 'briefings', icon: FileText, label: 'Briefings', desc: 'AI market analysis reports' },
             { id: 'agents', icon: Bot, label: 'Agents', desc: 'Multi-agent deliberation' },
             { id: 'discovery', icon: FlaskConical, label: 'Discovery', desc: 'Hypotheses & clustering' },
             { id: 'flows', icon: GitBranch, label: 'Flows', desc: 'Sector flows, actors & influence' },
+            { id: 'derivatives', icon: BarChart3, label: 'Derivatives', desc: 'Vol surface, skew & GEX' },
             { id: 'associations', icon: Network, label: 'Associations', desc: 'Feature correlations & anomalies' },
             { id: 'models', icon: Layers, label: 'Models', desc: 'Model registry & governance' },
             { id: 'knowledge', icon: Database, label: 'Knowledge', desc: 'Knowledge base & rules' },
@@ -58,7 +60,7 @@ const primaryTabs = [
     { id: 'briefings', icon: FileText, label: 'Brief' },
     { id: 'regime', icon: Radar, label: 'Regime' },
     { id: 'flows', icon: GitBranch, label: 'Flows' },
-    { id: 'options', icon: TrendingUp, label: 'Options' },
+    { id: 'viz-dashboard', icon: Activity, label: 'Intel' },
     { id: 'discovery', icon: FlaskConical, label: 'Discover' },
     { id: 'menu', icon: Menu, label: 'More' },
 ];
@@ -139,7 +141,7 @@ const styles = {
     },
 };
 
-const isPrimaryView = (view) => ['dashboard', 'briefings', 'regime', 'flows', 'options', 'discovery'].includes(view);
+const isPrimaryView = (view) => ['dashboard', 'briefings', 'regime', 'flows', 'viz-dashboard', 'discovery'].includes(view);
 
 export default function NavBar({ activeView, onNavigate }) {
     const [showMenu, setShowMenu] = useState(false);
