@@ -26,7 +26,6 @@ This file is the branch-local work journal for AstroGrid. Use it to understand c
 
 - Backend contract is still partial, so several views remain hybrid live-plus-fallback surfaces
 - `three-stack` is still large in the production bundle, although it is lazy-loaded behind the Orrery route
-- Branch changes still need to be committed and pushed
 - Endpoint requests still need to be relayed through the operator if we want fully live ephemeris, correlations, timeline, narrative, and eclipse data
 
 ## Backend Needs To Relay Through Operator
@@ -80,7 +79,7 @@ Verification:
 - Build output written to `grid/astrogrid_dist/`
 - Build passed with one remaining warning: the lazy-loaded `three-stack` chunk is still over the chunk warning threshold
 
-Files changed in the current uncommitted hardening pass:
+Files changed in the hardening pass committed as `dc82a2e`:
 
 - `grid/astrogrid/index.html`
 - `grid/astrogrid/src/App.jsx`
