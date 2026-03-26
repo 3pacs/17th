@@ -1,231 +1,144 @@
-# Next Agent Instructions
+# Next Agent Instructions (Updated 2026-03-26)
 
-## Agent 1: Paper Trading Auto-Execution Loop (TRADE-01)
-
-### Context
-The paper trading engine is built at `trading/paper_engine.py` with tables `paper_trades` and `paper_strategies`. 12 strategies are registered from PASSED TACTICAL hypotheses. Each strategy has a `leader` and `follower` feature, and the signal is: when leader moves >1% in a day, go same direction on follower next day.
-
-The engine has: `open_trade()`, `close_trade()`, `_check_kill()`, `kelly_position_size()`, `get_dashboard()`. What's missing is the **signal detection loop** that monitors features and auto-executes trades.
-
-### What to build
-
-**File:** `/data/grid_v4/grid_repo/grid/trading/signal_executor.py`
-
-```python
-"""
-Paper Trading Signal Executor.
-
-Runs periodically (hourly during market hours) to:
-1. Check all ACTIVE paper strategies for fired signals
-2. For each strategy: compare leader's latest daily return to threshold (1%)
-3. If signal fires: compute Kelly position size, open paper trade on follower
-4. For open trades past their expected_lag days: close at current price
-5. Log everything to decision journal for audit trail
-"""
-```
-
-**Core function: `execute_signals(engine: Engine) -> dict`**
-
-Steps:
-1. Load all ACTIVE strategies from `paper_strategies`
-2. For each strategy, parse `leader` and `follower` from the linked hypothesis's `lag_structure`
-3. Get leader's latest 2 daily prices from `resolved_series` (today and yesterday)
-4. Compute daily return: `(today - yesterday) / yesterday`
-5. If `abs(return) > 0.01` (1% threshold):
-   - Direction: LONG if positive, SHORT if negative
-   - Get follower's latest price for entry_price
-   - Compute position size via `kelly_position_size` using strategy's historical win_rate and avg_win/avg_loss
-   - Call `paper_engine.open_trade()`
-6. For open trades where `entry_date + expected_lag <= today`:
-   - Get follower's current price
-   - Call `paper_engine.close_trade()`
-7. Return summary: signals_checked, trades_opened, trades_closed, strategies_killed
-
-**Wire into intelligence loop in `api/main.py`:**
-Add to the schedule:
-```python
-def _paper_trading_signals():
-    try:
-        from trading.signal_executor import execute_signals
-        from db import get_engine as _ge
-        result = execute_signals(_ge())
-        log.info("Paper trading: {o} opened, {c} closed", o=result.get("trades_opened", 0), c=result.get("trades_closed", 0))
-    except Exception as exc:
-        log.debug("Paper trading signals failed: {e}", e=str(exc))
-
-# Run every hour during US market hours (14:00-21:00 UTC = 9AM-4PM ET)
-_sched.every(1).hours.do(_paper_trading_signals)
-```
-
-**Also add API endpoint** in `api/routers/trading.py`:
-```python
-@router.post("/execute-signals")
-async def execute_signals_now(_token: str = Depends(require_auth)) -> dict:
-    """Manually trigger signal execution."""
-    from trading.signal_executor import execute_signals
-    return execute_signals(get_db_engine())
-```
-
-### Verification
-1. `python -c "from trading.signal_executor import execute_signals; print('OK')"`
-2. Run `execute_signals(engine)` and confirm it checks all 12 strategies
-3. `pytest tests/ -x -q` passes
+This session activated many dormant subsystems and hardened epistemic integrity based on an external audit. Read the memory files at `/home/grid/.claude/projects/-home-grid/memory/` for full context.
 
 ---
 
-## Agent 2: Hyperliquid Integration (EXCH-01)
+## PHASE A: Close Remaining Audit Attack Surface (1-2 hours)
 
-### Context
-Hyperliquid is a decentralized perp exchange on Arbitrum. They have a Python SDK (`hyperliquid-python-sdk`). We want testnet first, then mainnet. The crypto backtest winners (BTC→SOL Sharpe 21, ETH→TAO Sharpe 16) are the primary strategies.
+These items come from two critique documents at `~/grid_issues.txt.rtf` and `~/best practice fixes.txt.rtf`. The most severe issues were already fixed. These remain:
 
-### What to build
+### A1. Single Route Registry for PWA
+**Problem:** Routes are defined in 3 places (imports in app.jsx, switch cases in app.jsx, nav items in NavBar.jsx). This is how views become orphaned.
+**Files:** `grid/pwa/src/app.jsx`, `grid/pwa/src/components/NavBar.jsx`
+**Fix:** Create `grid/pwa/src/config/routes.js` that exports a ROUTES object. Each entry has: id, component, label, icon, section, desc. Then app.jsx does `const route = ROUTES[activeView]; const View = route.component; return <View />` and NavBar derives its sections from the same object.
+**Test:** Every nav item maps to a real route. Every route has component, label, section. All IDs unique.
 
-**Install:** `pip install hyperliquid-python-sdk`
+### A2. Lazy Loading Non-Core Views
+**Problem:** All 30+ views are eagerly imported. Bundle is 567KB.
+**Files:** `grid/pwa/src/app.jsx` (after A1 is done, this goes into routes.js)
+**Fix:** Use `React.lazy()` for non-core views (Knowledge, WatchlistAnalysis, Operator, Snapshots, Hyperspace, AssociationsLegacy). Wrap `renderView()` in `<Suspense fallback={<div>Loading...</div>}>`.
 
-**File:** `/data/grid_v4/grid_repo/grid/trading/hyperliquid.py`
+### A3. Persistent Alert State for Crucix
+**Problem:** `_muteUntil` and `_alertHistory` are in-memory fields on the alerter objects. Lost on restart.
+**Files:** `Crucix/server.mjs`, `Crucix/lib/alerts/telegram.mjs`, `Crucix/lib/alerts/discord.mjs`
+**Fix:** Create `Crucix/lib/alerts/state.mjs` with an `AlertStateStore` class. Reads/writes to `runs/memory/alert_state.json` (atomic writes like hot.json). Methods: `getRecentAlerts(limit)`, `addAlert(alert)`, `mute(channel, durationMs)`, `unmute(channel)`, `isMuted(channel)`. Both Telegram and Discord alerters use this shared store. Mute state survives restart.
 
-```python
-"""
-Hyperliquid perp trading integration.
+### A4. Delta Computation Versioning
+**Problem:** If thresholds change over time, prior deltas aren't comparable to current ones.
+**Files:** `Crucix/lib/delta/memory.mjs`, `Crucix/lib/delta/engine.mjs`
+**Fix:** When `addRun()` stores a run, include metadata: `{ delta_engine_version: 'v2', threshold_profile: JSON.stringify(this.deltaThresholds), config_hash: sha256(thresholds) }`. This makes every stored delta self-documenting.
 
-Connects to Hyperliquid DEX for perpetual futures trading.
-Testnet first, then mainnet. Uses GRID signals for entry/exit.
-
-Architecture:
-  GRID Signal → Position Sizing → Hyperliquid Order → Confirmation → Journal
-"""
-```
-
-**Class: `HyperliquidTrader`**
-
-Constructor takes:
-- `private_key: str` (from env var `HYPERLIQUID_PRIVATE_KEY`)
-- `testnet: bool = True` (from env var `HYPERLIQUID_TESTNET=true`)
-- `max_position_usd: float = 100.0` (max position size per trade)
-- `max_drawdown_pct: float = 0.20` (20% max drawdown per wallet)
-
-Methods:
-- `get_balance() -> dict` — wallet balance, margin, open positions
-- `get_positions() -> list[dict]` — all open positions with unrealized P&L
-- `open_position(ticker: str, direction: str, size_usd: float) -> dict` — market order
-- `close_position(ticker: str) -> dict` — close all of a ticker's position
-- `get_trade_history(limit=50) -> list[dict]` — recent fills
-- `check_risk_limits() -> dict` — is wallet within risk limits?
-
-Add env vars to `config.py`:
-```python
-HYPERLIQUID_PRIVATE_KEY: str = ""
-HYPERLIQUID_TESTNET: bool = True
-HYPERLIQUID_MAX_POSITION_USD: float = 100.0
-HYPERLIQUID_MAX_DRAWDOWN_PCT: float = 0.20
-```
-
-Add env vars to `.env`:
-```
-HYPERLIQUID_PRIVATE_KEY=
-HYPERLIQUID_TESTNET=true
-HYPERLIQUID_MAX_POSITION_USD=100
-HYPERLIQUID_MAX_DRAWDOWN_PCT=0.20
-```
-
-**API endpoints** in `api/routers/trading.py`:
-- `GET /trading/hyperliquid/balance` — wallet state
-- `GET /trading/hyperliquid/positions` — open positions
-- `POST /trading/hyperliquid/trade` — open a position (body: ticker, direction, size_usd)
-- `POST /trading/hyperliquid/close` — close a position (body: ticker)
-
-### Verification
-1. `python -c "from trading.hyperliquid import HyperliquidTrader; print('OK')"`
-2. If SDK installed, test with testnet: `HyperliquidTrader(testnet=True).get_balance()`
-3. `pytest tests/ -x -q` passes
+### A5. Tests for New Code
+**Problem:** No tests for bot commands, threshold override behavior, or route registry.
+**Files:** New test files
+**Fix:**
+- `grid/pwa/src/__tests__/routes.test.js` — every nav item maps to route, unique IDs, required metadata
+- `Crucix/tests/bot-commands.test.mjs` — /alerts with empty/populated history, /mute with valid/invalid input, /unmute clears state, muted channel suppresses sends
+- `Crucix/tests/delta-thresholds.test.mjs` — defaults used when config absent, overrides passed correctly, invalid config normalized
 
 ---
 
-## Agent 3: Polymarket + Kalshi Integration (EXCH-02, EXCH-03)
+## PHASE B: Data Quality (from NEXT-SESSION.md, still valid)
 
-### Context
-Polymarket is a prediction market (crypto-native, USDC on Polygon). Kalshi is a US-regulated event contract exchange. Both let you bet on binary outcomes (Fed rate decision, CPI print, election results, etc.). GRID's regime analysis + macro data gives an edge.
+### B1. Fix WorldNews resolver mapping (33 features)
+`SELECT DISTINCT series_id FROM raw_series WHERE series_id LIKE 'wn_%' LIMIT 20` — see format, add to entity_map.py NEW_MAPPINGS_V2, run resolver.
 
-### What to build
+### B2. Fix FRED fedfred date parsing
+`scripts/fill_missing_features.py` line ~155 — DataFrame column name mismatch. Fix df.reset_index() iteration.
 
-**Install:** `pip install py-clob-client` (Polymarket), Kalshi has a REST API
+### B3. Fix analyst ratings int64 serialization
+Wrap values in `int(float(val))`, use `default=str` in json.dumps.
 
-**File:** `/data/grid_v4/grid_repo/grid/trading/prediction_markets.py`
+### B4. Run international pullers (20 features)
+BCB, AKShare, KOSIS, OECD, ECB — all have dedicated pullers, never run. Commands in NEXT-SESSION.md section 2b.
 
-Two classes:
+### B5. EIA electricity v2 format (7 features)
+Series IDs use different v2 endpoint path. Fix facets format per NEXT-SESSION.md section 2c.
 
-**`PolymarketTrader`:**
-- Constructor: `api_key` from env `POLYMARKET_API_KEY`, `private_key` from `POLYMARKET_PRIVATE_KEY`
-- `get_markets(query: str) -> list[dict]` — search active markets
-- `get_position(market_id: str) -> dict` — current position + P&L
-- `buy(market_id: str, outcome: str, amount_usd: float) -> dict` — buy shares
-- `sell(market_id: str, outcome: str, amount: float) -> dict` — sell shares
-- `get_portfolio() -> dict` — all positions
+### B6. Computed features (12 features)
+copper_gold_ratio, sp500_mom_3m, vix_3m_ratio, etc. All derivable from existing data. Run `fill_missing_features.py --batch computed`.
 
-**`KalshiTrader`:**
-- Constructor: `email` from env `KALSHI_EMAIL`, `password` from `KALSHI_PASSWORD`
-- `get_events(category: str = None) -> list[dict]` — active event contracts
-- `get_position(event_id: str) -> dict` — current position
-- `buy(event_id: str, side: str, contracts: int, price_cents: int) -> dict`
-- `sell(event_id: str, contracts: int, price_cents: int) -> dict`
-- `get_portfolio() -> dict`
-
-Add env vars to config.py and .env.
-
-**API endpoints** in `api/routers/trading.py`:
-- `GET /trading/polymarket/markets?query=` — search markets
-- `GET /trading/polymarket/portfolio` — positions
-- `GET /trading/kalshi/events` — active events
-- `GET /trading/kalshi/portfolio` — positions
-
-### Verification
-1. Import test
-2. `pytest tests/ -x -q` passes
+### B7. Run resolver after all fixes
+```bash
+cd /data/grid_v4/grid_repo/grid
+PYTHONPATH=. /data/grid_v4/venv/bin/python -c "
+from normalization.resolver import Resolver
+from db import get_engine
+r = Resolver(db_engine=get_engine())
+result = r.resolve_pending()
+print(result)
+"
+```
 
 ---
 
-## Agent 4: Multi-Wallet Manager (EXCH-04)
+## PHASE C: Remaining Feature Work
 
-### What to build
+### C1. hermes@stepdad.finance email + sender allowlist
+See NEXT-SESSION.md Priority 4.
 
-**File:** `/data/grid_v4/grid_repo/grid/trading/wallet_manager.py`
+### C2. Wire living graph renderers to real data
+PhaseSpace → regime PCA trajectory, Orbital → sector relative performance, ForceNetwork → feature correlation. See NEXT-SESSION.md Priority 6.
 
-**DB table:** `trading_wallets`
-```sql
-CREATE TABLE IF NOT EXISTS trading_wallets (
-    id              TEXT PRIMARY KEY,
-    exchange        TEXT NOT NULL,
-    wallet_type     TEXT NOT NULL DEFAULT 'paper',
-    initial_capital FLOAT NOT NULL,
-    current_capital FLOAT NOT NULL,
-    high_water_mark FLOAT NOT NULL,
-    max_drawdown    FLOAT NOT NULL DEFAULT 0,
-    total_pnl       FLOAT NOT NULL DEFAULT 0,
-    total_trades    INTEGER NOT NULL DEFAULT 0,
-    status          TEXT NOT NULL DEFAULT 'ACTIVE',
-    risk_limit_pct  FLOAT NOT NULL DEFAULT 0.05,
-    max_drawdown_limit FLOAT NOT NULL DEFAULT 0.20,
-    metadata        JSONB DEFAULT '{}',
-    created_at      TIMESTAMPTZ DEFAULT NOW(),
-    updated_at      TIMESTAMPTZ DEFAULT NOW()
-);
-```
+### C3. Oracle confidence calibration
+First scoring Apr 17. After that: fix confidence normalization (everything at 95%), add regime-aware model switching. See NEXT-SESSION.md Priority 5.
 
-**Class: `WalletManager`**
-- `create_wallet(exchange, wallet_type, initial_capital, risk_limits) -> str`
-- `get_wallet(wallet_id) -> dict`
-- `update_pnl(wallet_id, pnl) -> dict` — updates capital, HWM, drawdown, checks limits
-- `get_all_wallets() -> list[dict]`
-- `get_dashboard() -> dict` — aggregated across all wallets
-- `check_risk(wallet_id) -> dict` — is this wallet still within limits?
-- `kill_wallet(wallet_id, reason) -> dict`
+### C4. Flows page rework, watchlist redesign, hypothesis UI
+See NEXT-SESSION.md Priority 7.
 
-**API endpoints:**
-- `GET /trading/wallets` — all wallets
-- `POST /trading/wallets` — create wallet
-- `GET /trading/wallets/{id}` — single wallet
-- `POST /trading/wallets/{id}/kill` — kill wallet
+### C5. Crucix git push auth
+`calesthio/Crucix` needs credentials configured. Commit f635f92 is local. Either set up SSH key or HTTPS token.
 
-### Verification
-1. Import + create wallet test
-2. Tests pass
+---
+
+## What Already Works (don't rebuild these)
+
+| Subsystem | Status | Notes |
+|-----------|--------|-------|
+| bridges/ledger_sync.py | LIVE | Dead-letter table, structured logging, no silent failures |
+| Hypothesis tester | LIVE in Hermes (12h) | Syncs to DuckDB, no status inflation |
+| Backtest scanner | LIVE in Hermes (weekly) | Generates TACTICAL hypotheses |
+| Paper trading signal_executor | LIVE (hourly in api/main.py) | Fires when PASSED hypotheses exist |
+| Crucix rule-based ideas | LIVE (LLM fallback) | All ideas carry epistemic metadata |
+| Crucix /alerts /mute /unmute | LIVE (Telegram + Discord) | Input validated, mute enforced in send path |
+| Delta threshold overrides | LIVE | Config flows through MemoryManager |
+| PWA Knowledge/Watchlist/Operator/Snapshots | ROUTED | In app.jsx and NavBar |
+| /api/v1/derivatives/svi-surface/{ticker} | LIVE | SVI fitting, arbitrage, Greeks, percentile |
+| TradingView webhook | LIVE | Payload hash, dedup, schema version, provenance |
+| trading/signal_executor.py | EXISTS | Already built and scheduled |
+| trading/hyperliquid.py | EXISTS | Already built, needs testnet key |
+| trading/prediction_markets.py | EXISTS | Polymarket + Kalshi, needs API keys |
+| trading/wallet_manager.py | EXISTS | Multi-wallet management |
+
+## Hermes Schedule (current)
+
+| Task | Interval | Module |
+|------|----------|--------|
+| Market briefing | Hourly | ollama/market_briefing.py |
+| Paper trading signals | Hourly | trading/signal_executor.py (via api/main.py) |
+| Capital flow research | 4 hours | analysis/capital_flows.py |
+| 100x digest | 4 hours | alerts/hundredx_digest.py |
+| Oracle cycle | 6 hours | oracle/engine.py + report.py |
+| **Hypothesis testing** | **12 hours** | **analysis/hypothesis_tester.py** (NEW) |
+| **Backtest scanner** | **Weekly** | **analysis/backtest_scanner.py** (NEW) |
+| Options pull | Daily | ingestion/options.py |
+| Daily digest | Daily 07:00 UTC | alerts/email.py |
+| UX audit | 6 hours | scripts/ux_auditor.py |
+
+## Key File Locations
+
+| What | Where |
+|------|-------|
+| Ledger sync bridge | grid/bridges/ledger_sync.py |
+| Dead-letter query | `from bridges.ledger_sync import get_sync_failures` |
+| Hypothesis tester | grid/analysis/hypothesis_tester.py |
+| Backtest scanner | grid/analysis/backtest_scanner.py |
+| Vol surface engine | grid/analysis/vol_surface.py |
+| SVI surface endpoint | grid/api/routers/derivatives.py (bottom) |
+| TradingView webhook | grid/api/routers/tradingview.py |
+| Epistemic integrity rules | ~/.claude/projects/-home-grid/memory/feedback_epistemic_integrity.md |
+| External audit tracker | ~/.claude/projects/-home-grid/memory/project_external_audit.md |
+| Critique documents | ~/grid_issues.txt.rtf, ~/best practice fixes.txt.rtf |
+| DuckDB path | /home/grid/grid_v4/data/grid.duckdb |
+| Crucix config | /data/grid_v4/Crucix/crucix.config.mjs |

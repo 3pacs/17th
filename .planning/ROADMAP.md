@@ -62,16 +62,31 @@
 **Goal:** Standalone celestial intelligence interface. 3D planetary visualization, ephemeris, market-astro correlation engine, and narrative synthesis. Separate app sharing GRID's backend.
 See ASTROGRID-PLAN.md for full architecture.
 
-### Phase 14: Oracle & Data Completion — IN PROGRESS
-**Goal:** Self-improving prediction engine with scored track record. Fill remaining 124 zero-data features. Supervised intelligence on all outbound signals.
-**Delivered (2026-03-26):**
+### Phase 14: Oracle, Data Completion & Epistemic Hardening — IN PROGRESS
+**Goal:** Self-improving prediction engine with scored track record. Fill remaining 124 zero-data features. Supervised intelligence on all outbound signals. Activate dormant subsystems. Harden epistemic integrity.
+**Delivered Session 1 (2026-03-26):**
 - Oracle engine: 5 competing models, signal/anti-signal, weight evolution, immutable prediction journal
 - 100x digest: 3-layer supervised filter (sanity → LLM review → cross-verify), kills spam
 - Options puller fix: skip near-expiry garbage, quality gate on scanner
 - Viz intelligence engine: 11 rules, VizSpec protocol, LivingGraph renderer
 - Bulk data: CBOE 35yr VIX/SKEW, Binance 5yr crypto, DeFiLlama, Open-Meteo 5yr, EIA
 - 2M+ raw rows ingested, 328K resolved
-**Remaining:** Fix resolver mappings (wn_*, FRED date parse, analyst int64). Fill intl macro via existing pullers. EIA electricity v2 format. Compute derived features. OFR/Comtrade/VIIRS/Patents endpoints.
+**Delivered Session 2 (2026-03-26):**
+- bridges/ledger_sync.py: Regime + hypothesis sync to DuckDB with dead-letter table, zero silent failures
+- Hypothesis tester wired into Hermes (12h cycle), syncs to DuckDB without status inflation
+- Backtest scanner wired into Hermes (weekly), auto-generates TACTICAL hypotheses
+- Paper trading chain closed: scanner → tester → signal_executor (hourly)
+- Vol surface engine exposed via /api/v1/derivatives/svi-surface/{ticker} (SVI, arbitrage, Greeks, percentile)
+- TradingView webhook hardened: payload hash, dedup, schema version, provenance envelope
+- Crucix rule-based ideas re-enabled as LLM fallback with epistemic metadata (source/eligibility/evidence_class/calibration)
+- Crucix /alerts /mute /unmute registered (Telegram + Discord), input validated, mute enforced in send path
+- Crucix delta threshold overrides now flow from config
+- PWA: Knowledge, WatchlistAnalysis, Operator, Snapshots views routed + in NavBar
+- External audit response: 8 of 17 critique items fixed (see ~/grid_issues.txt.rtf)
+**Remaining:**
+- Data quality: Fix resolver mappings (wn_*, FRED date parse, analyst int64). Fill intl macro. EIA v2. Computed features.
+- Audit fixes: Route registry, lazy loading, alert state persistence, delta versioning, tests for new code.
+- Oracle calibration after first Apr 17 scoring.
 
 ### Phase 15: Crucix iOS & Hermes Email — PLANNED
 **Goal:** Crucix OSINT interface reformatted for iOS. Hermes email (hermes@stepdad.finance) with sender allowlist.
@@ -146,6 +161,23 @@ See ASTROGRID-PLAN.md for full architecture.
 | DATA-14 | 14 | Done — Binance/CoinGecko/DeFiLlama crypto bulk |
 | DATA-15 | 14 | Done — Open-Meteo 5yr weather, EIA energy |
 | DATA-16 | 14 | Remaining — 124 features need resolver fix + intl pullers |
+| BRIDGE-01 | 14 | Done — bridges/ledger_sync.py regime + hypothesis sync |
+| BRIDGE-02 | 14 | Done — Dead-letter table for sync failures |
+| ACTIVATE-01 | 14 | Done — Hypothesis tester in Hermes 12h cycle |
+| ACTIVATE-02 | 14 | Done — Backtest scanner in Hermes weekly cycle |
+| ACTIVATE-03 | 14 | Done — Vol surface SVI endpoint |
+| ACTIVATE-04 | 14 | Done — PWA orphaned views routed |
+| HARDEN-01 | 14 | Done — No silent sync failures (dead-letter) |
+| HARDEN-02 | 14 | Done — No status inflation (pass-through states) |
+| HARDEN-03 | 14 | Done — TradingView webhook provenance + dedup |
+| HARDEN-04 | 14 | Done — Crucix ideas epistemic metadata |
+| HARDEN-05 | 14 | Done — Mute validation + enforcement in send path |
+| HARDEN-06 | 14 | Done — Delta threshold config actually works |
+| HARDEN-07 | 14 | Open — Route registry (single source of truth) |
+| HARDEN-08 | 14 | Open — Lazy loading non-core views |
+| HARDEN-09 | 14 | Open — Alert state persistence across restart |
+| HARDEN-10 | 14 | Open — Delta computation versioning |
+| HARDEN-11 | 14 | Open — Tests for bot commands + thresholds |
 | VIZ-01 | 14 | Done — viz_intelligence.py 11 rules |
 | VIZ-02 | 14 | Done — VizSpec protocol + API |
 | VIZ-03 | 14 | Done — LivingGraph.jsx universal renderer |

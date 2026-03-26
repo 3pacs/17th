@@ -2,77 +2,96 @@
 
 ## Current Position
 
-Phase: 14 — Oracle & Data Completion
+Phase: 14 — Oracle & Data Completion + Epistemic Hardening
 Plan: ROADMAP.md (16 phases planned)
-Status: Phases 1–12.5 COMPLETE. Phase 13 (AstroGrid) IN PROGRESS. Phase 14 started this session.
-Last activity: 2026-03-26 — Oracle engine built, 2M raw rows ingested, viz intelligence engine, 100x digest with supervised sanity checks, options puller near-expiry fix.
+Status: Phases 1–12.5 COMPLETE. Phase 13 (AstroGrid) IN PROGRESS (separate agent). Phase 14 active — subsystem activation + audit response.
+Last activity: 2026-03-26 — Two sessions: (1) Oracle engine, 100x digest, viz engine, bulk data. (2) Subsystem activation, epistemic hardening from external audit.
 
 ## Accumulated Context
 
-### What shipped this session (2026-03-26)
+### What shipped in Session 2 (2026-03-26, second session)
 
-#### Oracle Prediction Engine (ORACLE-01 through ORACLE-05)
-- oracle/engine.py: 5 competing models (flow_momentum, regime_contrarian, options_flow, cross_asset, news_energy)
-- Self-improving loop: score expired predictions → evolve weights → generate new → report
-- Signal + anti-signal architecture: every prediction shows confirming AND contradicting evidence
-- 615 predictions generated in first cycle (41 tickers × 5 models, expiry Apr 17)
+#### Subsystem Activation — Closing the Flywheel
+- **bridges/ledger_sync.py** (NEW): Syncs regime state and hypothesis calibration from Postgres → DuckDB. Dead-letter table `sync_failures` for failed syncs. `get_sync_failures()` for operator visibility. Zero silent exception swallowing.
+- **Hypothesis tester activated**: Wired into Hermes operator (12h cycle). `RUN_HYPOTHESIS_TESTS` action added. Results sync to DuckDB without status inflation — states pass through as-is.
+- **Backtest scanner activated**: Wired into Hermes operator (weekly). Scans feature pairs for lead/lag, generates TACTICAL hypotheses that feed tester → paper trading.
+- **Paper trading chain complete**: backtest_scanner (weekly) → hypothesis_tester (12h) → signal_executor (hourly, already existed in api/main.py).
+- **Vol surface engine exposed**: New `/api/v1/derivatives/svi-surface/{ticker}` — SVI fitting, arbitrage detection, Greeks grid, historical percentile.
+- **PWA views routed**: Knowledge, WatchlistAnalysis, Operator, Snapshots — added to app.jsx and NavBar.
+- **PWA rebuilt**: 567KB bundle, clean build.
+
+#### Crucix Hardening
+- **Rule-based trade ideas re-enabled** as LLM fallback. Every idea carries epistemic metadata: source (rule_v1), eligibility (research_only), evidence_class (heuristic), calibration (uncalibrated).
+- **Bot commands registered**: /alerts, /mute, /unmute for Telegram + Discord. Mute input validated (positive, max 168h). Mute enforced in sendAlert() send path.
+- **Delta threshold overrides fixed**: Config thresholds from crucix.config.mjs now flow through MemoryManager to computeDelta().
+- **Dashboard**: RULE-BASED badge, eligibility class per idea.
+
+#### Epistemic Hardening (External Audit Response)
+Received and addressed 17-point architectural critique (~/grid_issues.txt.rtf) + 18-point best practice pass (~/best practice fixes.txt.rtf).
+
+Fixed:
+1. Silent `except: pass` at provenance boundaries → dead-letter table + structured logging
+2. Lossy TESTING→PARTIALLY_SUPPORTED status mapping → removed, states pass through as-is
+3. TradingView webhook provenance gaps → payload hash, dedup key, schema version, timestamps, duplicate rejection
+4. Rule-based ideas without epistemic metadata → source/eligibility/evidence_class/calibration on every idea
+5. Mute not enforced in send path → guard in sendAlert()
+6. Mute input not validated → rejects invalid values
+7. Delta config silently ignored → thresholds flow from config
+8. auto_regime bare except:pass → logged failure handling
+
+Still open from audit (see NEXT-AGENT-INSTRUCTIONS.md Phase A):
+- Route registry (single source of truth)
+- Lazy loading for non-core views
+- Alert state persistence across restart
+- Delta computation versioning
+- Tests for new bot commands + threshold override
+
+### What shipped in Session 1 (2026-03-26, first session)
+
+#### Oracle Prediction Engine
+- 5 competing models, 615 predictions (expiry Apr 17), self-improving loop, signal + anti-signal
 - oracle_predictions, oracle_models, oracle_iterations tables
-- oracle/report.py: Rich email with scorecard, model tournament, signal/anti-signal breakdown
-- Wired into hermes_operator (6h cycle)
+- Rich email report, runs every 6h via Hermes
 
-#### 100x Digest with Supervised Intelligence
-- alerts/hundredx_digest.py: 3-layer filter pipeline
-  1. Sanity check (data ranges: IV 3-250%, PCR < 20, max pain within 30% of spot, score differentiation)
-  2. LLM review (Hermes evaluates each opportunity, PASS/FAIL/SUSPECT)
-  3. Cross-verification (live yfinance chain check, spot price, recommended strikes)
-- Killed individual email spam — only bundled 4h digest
-- First run: correctly rejected all 18 garbage signals from near-expiry chain data
-- Wired into hermes_operator (4h cycle)
+#### 100x Supervised Digest
+- 3-layer filter: sanity check → LLM review → cross-verification
+- Killed email spam, bundled 4h digest only
 
-#### Options Puller Fix
-- ingestion/options.py: Skip expiries within 2 DTE (near-worthless chains had garbage data)
-- Scanner quality filter: requires total_oi >= 1000 AND iv_atm >= 3%
-- Clean data shows real signals: IWM CALL 3.5, SPY CALL 3.37 (modest, correct for calm market)
+#### Options Data Quality Fix
+- Skip expiries within 2 DTE, quality gate (total_oi >= 1000, iv_atm >= 3%)
 
 #### Visualization Intelligence Engine
-- analysis/viz_intelligence.py: 11 learned rules mapping data patterns → optimal chart types
-- VizSpec protocol: complete rendering instruction for any living graph
-- Weight schedules: data sources "breathe" at natural cadence (real-time equity pulses, monthly macro is slow heartbeat)
-- api/routers/viz.py: /recommend, /rules, /weights, pre-built specs for 6 chart types
-- pwa/src/components/LivingGraph.jsx: Universal renderer (PhaseSpace, ForceNetwork, Orbital, TimeScrubber)
+- 11 learned rules, VizSpec protocol, weight schedules, LivingGraph component
 
-#### Bulk Historical Data Pull (2M+ rows)
-- CBOE: VIX (35yr), VIX3M (17yr), VIX9D (15yr), SKEW (35yr) — 26,240 rows
-- Binance: BTC/ETH/SOL/TAO daily klines (2021→2024) — 9,008 rows
-- CoinGecko: 4 coins × 365 days — 2,920 rows
-- DeFiLlama: Solana DEX volume (1,634 days) + TVL (1,835 days)
-- Open-Meteo: 5 cities × HDD/CDD × 5yr — 18,260 rows
-- EIA: 9 energy series (2016→2026) — 1,080 rows
-- WorldNews: 33 features × 7 days — 198 rows
-- Entity mappings added for 80+ new series IDs
-
-#### Infrastructure Created
-- ingestion/web_scraper.py — Multi-source web scraper with trust rankings + scrape_audit table
-- scripts/fill_missing_features.py — Direct API bulk puller (FRED, yfinance, EIA, weather, analyst, OFR, GDELT, stablecoins, computed)
-- scripts/bulk_historical_pull.py — ZIP/CSV bulk downloader (CBOE, Binance, CoinGecko, options, DeFi, Polymarket)
-- scripts/scrape_missing_features.py — Original web scraper (DDG blocked, superseded by direct API approach)
+#### Bulk Historical Data (2M+ rows)
+- CBOE, Binance, CoinGecko, DeFiLlama, Open-Meteo, EIA data
 
 ### Known Issues
 - WorldNews API key expired (402) — wn_* features in raw_series but not resolving
 - FRED fedfred library returns dates in value column — parse fix needed
 - Analyst ratings yfinance int64 serialization — needs numpy int conversion
 - OFR Financial Stress API endpoint returns 400 — URL format changed
-- 124 features still at zero (see breakdown below)
-- Options daily signals for 2026-03-26 are garbage (near-expiry chain) — fix applied, will correct on next pull
-- Oracle confidence normalization too generous (everything at 95%) — needs calibration after first scoring cycle
-- Resolver not mapping all new series IDs to features — entity_map needs WN:* prefix mappings
+- 124 features still at zero
+- Oracle confidence normalization too generous (everything at 95%)
+- Crucix push needs auth for calesthio/Crucix (commit f635f92 local)
 
 ### Data State
 - Features at zero: 124 (down from 159)
 - Total resolved_series: 328,294
-- Raw series added today: 2,087,768
+- Raw series: 2,087,768+
 - Oracle predictions: 615 (expiry Apr 17)
-- Coverage: equity 100%, earnings 100%, vol 99%, breadth 94%, crypto 89%, commodity 86%, rates 86%, sentiment 85%, credit 81%, fx 75%, macro 57%, alternative 0%, systemic 0%, trade 0%
+- Tests: 489 passing, 0 failures
+- Coverage: equity 100%, earnings 100%, vol 99%, breadth 94%, crypto 89%
 
-### Disk usage
-- /data drive: ~50GB of 11TB used (~1%)
+### Hermes Schedule (current)
+| Task | Interval | Module |
+|------|----------|--------|
+| Market briefing | Hourly | ollama/market_briefing.py |
+| Paper trading signals | Hourly | trading/signal_executor.py |
+| Capital flow research | 4 hours | analysis/capital_flows.py |
+| 100x digest | 4 hours | alerts/hundredx_digest.py |
+| Oracle cycle | 6 hours | oracle/engine.py |
+| Hypothesis testing | 12 hours | analysis/hypothesis_tester.py |
+| Backtest scanner | Weekly | analysis/backtest_scanner.py |
+| UX audit | 6 hours | scripts/ux_auditor.py |
+| Daily digest | Daily | alerts/email.py |
