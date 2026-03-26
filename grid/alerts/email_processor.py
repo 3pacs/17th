@@ -209,6 +209,81 @@ class HermesEmailProcessor:
                 break
         return filtered
 
+    def _query_perplexity(self, query: str) -> str | None:
+        """Query the Perplexity API for research content.
+
+        Args:
+            query: The research question to ask.
+
+        Returns:
+            str: Perplexity's response text, or None on failure.
+        """
+        import urllib.request
+        import urllib.error
+
+        try:
+            from config import settings
+            api_key = getattr(settings, "PERPLEXITY_API_KEY", "") or ""
+            if not api_key:
+                return None
+
+            req = urllib.request.Request(
+                "https://api.perplexity.ai/chat/completions",
+                data=json.dumps({
+                    "model": "sonar",
+                    "messages": [
+                        {"role": "user", "content": query},
+                    ],
+                    "max_tokens": 800,
+                }).encode(),
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+            )
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                data = json.loads(resp.read())
+                content = data["choices"][0]["message"]["content"]
+                log.info("Perplexity API: got {n} chars for query", n=len(content))
+                return content[:3000]
+
+        except Exception as exc:
+            log.debug("Perplexity API failed: {e}", e=str(exc))
+            return None
+
+    def _resolve_perplexity_url(self, url: str) -> str | None:
+        """Resolve a perplexity.ai URL via their API instead of scraping.
+
+        Extracts the topic/ticker from the URL and queries the API.
+        """
+        from urllib.parse import urlparse, parse_qs
+
+        parsed = urlparse(url)
+        path = parsed.path.strip("/")
+
+        # perplexity.ai/finance/RXT → ask about RXT stock
+        if path.startswith("finance/"):
+            ticker = path.split("/")[1].upper()
+            return self._query_perplexity(
+                f"What is the current situation with {ticker} stock? "
+                f"Recent news, price action, analyst sentiment, and key risks. Be concise."
+            )
+
+        # perplexity.ai/search?q=... → use the query directly
+        q = parse_qs(parsed.query).get("q", [""])[0]
+        if q:
+            return self._query_perplexity(q)
+
+        # Generic perplexity link — ask about the page topic
+        # Extract slug from path
+        slug = path.split("/")[-1].replace("-", " ") if path else ""
+        if slug:
+            return self._query_perplexity(
+                f"Summarize the key information about: {slug}"
+            )
+
+        return None
+
     def _fetch_url_content(self, url: str) -> str | None:
         """Fetch a URL and return cleaned text content.
 
@@ -287,9 +362,19 @@ class HermesEmailProcessor:
 
         sections = []
         for url in urls:
+            domain = urlparse(url).netloc
+
+            # Route perplexity.ai links through their API
+            if "perplexity.ai" in domain:
+                content = self._resolve_perplexity_url(url)
+                if content:
+                    sections.append(f"[Perplexity Research]\n{content}")
+                    log.info("Hermes resolved perplexity link: {u}", u=url[:80])
+                    continue
+
+            # Everything else: direct fetch
             content = self._fetch_url_content(url)
             if content and len(content) > 100:  # skip trivially short pages
-                domain = urlparse(url).netloc
                 sections.append(f"[Content from {domain}]\n{content}")
                 log.info("Hermes fetched link: {u} ({n} chars)", u=url[:80], n=len(content))
 

@@ -155,6 +155,9 @@ class Settings(BaseSettings):
     HERMES_EMAIL_CHECK_INTERVAL_MINUTES: int = 15
     HERMES_EMAIL_ALLOWLIST: str = "stepdadfinance@gmail.com"
 
+    # Perplexity API (for resolving perplexity.ai links in emails)
+    PERPLEXITY_API_KEY: str = ""
+
     # Market briefing schedules
     BRIEFING_CRON_DAILY: str = "0 6 * * 1-5"  # weekdays 6 AM
     BRIEFING_CRON_WEEKLY: str = "0 7 * * 1"   # Monday 7 AM
