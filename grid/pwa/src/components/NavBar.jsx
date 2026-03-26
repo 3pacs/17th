@@ -3,6 +3,7 @@ import {
     Home, Radar, BookOpen, FlaskConical, Bot, Settings, FileText,
     Workflow, Atom, Terminal, TrendingUp, BarChart3, Globe, Layers,
     Activity, Menu, X, ChevronRight, Network, Crosshair, GitBranch,
+    Database, Eye, Camera, ListChecks,
 } from 'lucide-react';
 
 const menuSections = [
@@ -24,6 +25,8 @@ const menuSections = [
             { id: 'flows', icon: GitBranch, label: 'Flows', desc: 'Sector flows, actors & influence' },
             { id: 'associations', icon: Network, label: 'Associations', desc: 'Feature correlations & anomalies' },
             { id: 'models', icon: Layers, label: 'Models', desc: 'Model registry & governance' },
+            { id: 'knowledge', icon: Database, label: 'Knowledge', desc: 'Knowledge base & rules' },
+            { id: 'watchlist', icon: ListChecks, label: 'Watchlist', desc: 'Deep watchlist analysis' },
         ],
     },
     {
@@ -37,6 +40,8 @@ const menuSections = [
     {
         label: 'OPERATIONS',
         items: [
+            { id: 'operator', icon: Eye, label: 'Operator', desc: 'Hermes operator dashboard' },
+            { id: 'snapshots', icon: Camera, label: 'Snapshots', desc: 'PIT analytical snapshots' },
             { id: 'workflows', icon: Workflow, label: 'Workflows', desc: 'Data & compute pipelines' },
             { id: 'weights', icon: Settings, label: 'Weights', desc: 'Tune regime feature influence' },
             { id: 'hyperspace', icon: Globe, label: 'Hyperspace', desc: 'Distributed compute node' },

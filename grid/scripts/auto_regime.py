@@ -262,7 +262,7 @@ def run_with_weights(engine, weights: dict[str, float], save: bool = False) -> d
 
     sorted_contribs = sorted(contributions.items(), key=lambda x: abs(x[1]["contribution"]), reverse=True)
 
-    return {
+    result = {
         "regime": regime,
         "confidence": round(confidence, 4),
         "posture": posture,
@@ -272,6 +272,16 @@ def run_with_weights(engine, weights: dict[str, float], save: bool = False) -> d
         "n_features": len(fid_to_name),
         "weights": weights,
     }
+
+    # Sync to grid_app ledger — failure is logged + dead-lettered, never silent
+    try:
+        from bridges.ledger_sync import sync_regime
+        if not sync_regime(result):
+            log.warning("Ledger sync (regime) returned False in run_with_weights")
+    except Exception as exc:
+        log.warning("Ledger sync (regime) raised in run_with_weights: {e}", e=str(exc))
+
+    return result
 
 
 def run() -> dict[str, Any]:
@@ -472,6 +482,16 @@ def run() -> dict[str, Any]:
         print(f"Flags:       {contradictions}")
     print(f"Features:    {len(fid_to_name)} used, {len(missing)} missing")
     print("Updated decision_journal")
+
+    # Sync to grid_app DuckDB ledger (closes the flywheel feedback loop)
+    try:
+        from bridges.ledger_sync import sync_regime
+        if sync_regime(result):
+            print("Synced to grid_app ledger")
+        else:
+            print("Warning: grid_app ledger sync returned False")
+    except Exception as exc:
+        print(f"Warning: grid_app ledger sync failed: {exc}")
 
     return result
 

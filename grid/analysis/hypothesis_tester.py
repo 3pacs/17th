@@ -437,6 +437,13 @@ def run_all_tests(engine: Engine) -> dict[str, Any]:
 
         try:
             with engine.begin() as conn:
+                # Get old state before update
+                old_row = conn.execute(
+                    text("SELECT state FROM hypothesis_registry WHERE id = :id"),
+                    {"id": hyp_id},
+                ).fetchone()
+                old_state = old_row[0] if old_row else "CANDIDATE"
+
                 conn.execute(
                     text(
                         "UPDATE hypothesis_registry "
@@ -447,6 +454,26 @@ def run_all_tests(engine: Engine) -> dict[str, Any]:
                     ),
                     {"state": new_state, "reason": full_reason, "id": hyp_id},
                 )
+
+            # Sync to grid_app DuckDB ledger — no status inflation.
+            # Pass through exact states. The ledger records what happened,
+            # not an optimistic interpretation.
+            try:
+                from bridges.ledger_sync import sync_hypothesis_status
+                synced = sync_hypothesis_status(
+                    hypothesis_id=str(hyp_id),
+                    old_status=old_state,
+                    new_status=new_state,
+                    evidence=full_reason,
+                )
+                if not synced:
+                    log.warning("Ledger sync returned False for hypothesis {id}", id=hyp_id)
+            except Exception as sync_exc:
+                log.warning(
+                    "Ledger sync failed for hypothesis {id}: {e}",
+                    id=hyp_id, e=str(sync_exc),
+                )
+
         except Exception as exc:
             log.warning(
                 "Failed to update hypothesis {id}: {e}", id=hyp_id, e=str(exc)

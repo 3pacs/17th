@@ -735,3 +735,60 @@ async def get_history(
     except Exception as exc:
         log.warning("Derivatives history failed for {t}: {e}", t=ticker, e=str(exc))
         return {"error": str(exc), "ticker": ticker.upper(), "history": []}
+
+
+# ── GET /svi-surface/{ticker} ─────────────────────────────────────
+
+@router.get("/svi-surface/{ticker}")
+async def get_svi_surface(ticker: str) -> dict[str, Any]:
+    """Full SVI-parameterized vol surface analysis.
+
+    Returns SVI-fitted surface, skew metrics, term structure,
+    arbitrage flags, and historical percentile ranking.
+    """
+    try:
+        from analysis.vol_surface import VolSurfaceEngine
+
+        db = get_db_engine()
+        vse = VolSurfaceEngine(db_engine=db)
+        surface = vse.build_surface(ticker.upper())
+
+        if not surface or surface.get("error"):
+            return {"ticker": ticker.upper(), "error": surface.get("error", "No data")}
+
+        result = {"ticker": ticker.upper()}
+
+        # Skew analysis
+        try:
+            result["skew"] = vse.compute_skew(ticker.upper())
+        except Exception:
+            result["skew"] = None
+
+        # Term structure
+        try:
+            result["term_structure"] = vse.compute_term_structure(ticker.upper())
+        except Exception:
+            result["term_structure"] = None
+
+        # Arbitrage detection
+        try:
+            result["arbitrage"] = vse.detect_arbitrage(ticker.upper())
+        except Exception:
+            result["arbitrage"] = None
+
+        # Greeks grid
+        try:
+            result["greeks"] = vse.compute_greeks_grid(ticker.upper())
+        except Exception:
+            result["greeks"] = None
+
+        # Historical percentile
+        try:
+            result["percentile"] = vse.historical_percentile(ticker.upper())
+        except Exception:
+            result["percentile"] = None
+
+        return result
+    except Exception as exc:
+        log.warning("SVI surface failed for {t}: {e}", t=ticker, e=str(exc))
+        return {"error": str(exc), "ticker": ticker.upper()}

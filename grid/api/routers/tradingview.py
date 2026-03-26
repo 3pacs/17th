@@ -10,6 +10,7 @@ Endpoints:
 
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import date, datetime, timezone
 from typing import Any
@@ -134,8 +135,14 @@ async def receive_webhook(
     # Build series_id for this signal
     series_id = f"tv_{ticker}_{strategy}".lower().replace(" ", "_") if strategy else f"tv_{ticker}".lower()
 
-    # Store in raw_series
+    # Provenance: hash the canonical payload for dedup and audit trail
+    canonical = json.dumps(body, sort_keys=True, default=str)
+    payload_hash = hashlib.sha256(canonical.encode()).hexdigest()[:16]
+    dedup_key = f"{series_id}:{today}:{payload_hash}"
+
+    # Store in raw_series with full provenance
     raw_payload = {
+        # Core signal
         "ticker": ticker,
         "action": action,
         "price": price,
@@ -143,11 +150,41 @@ async def receive_webhook(
         "strategy": strategy,
         "message": message,
         "signal_value": signal_value,
-        "received_at": now.isoformat(),
+        # Provenance (immutable after ingest)
+        "_provenance": {
+            "schema_version": "tv_webhook_v1",
+            "payload_hash": payload_hash,
+            "dedup_key": dedup_key,
+            "source_timestamp": body.get("time", body.get("timenow")),
+            "ingest_timestamp": now.isoformat(),
+            "alert_name": body.get("alert_name", body.get("alertName")),
+            "exchange": body.get("exchange"),
+        },
+        # Pass through any extra fields from TradingView
         **{k: v for k, v in body.items() if k not in ("ticker", "action", "price", "interval", "strategy", "message", "symbol", "close", "order_action", "timeframe", "strategy_name")},
     }
 
+    # Dedup: reject exact duplicates within same day
     with engine.begin() as conn:
+        existing = conn.execute(
+            text(
+                "SELECT id FROM raw_series "
+                "WHERE series_id = :sid AND obs_date = :obs "
+                "AND raw_payload::jsonb->'_provenance'->>'payload_hash' = :hash "
+                "LIMIT 1"
+            ),
+            {"sid": series_id, "obs": today, "hash": payload_hash},
+        ).fetchone()
+
+        if existing:
+            log.info("TradingView webhook — deduplicated {dk}", dk=dedup_key)
+            return {
+                "status": "deduplicated",
+                "dedup_key": dedup_key,
+                "ticker": ticker,
+                "timestamp": now.isoformat(),
+            }
+
         conn.execute(
             text(
                 "INSERT INTO raw_series (series_id, source_id, obs_date, "
@@ -165,8 +202,8 @@ async def receive_webhook(
         )
 
     log.info(
-        "TradingView webhook — {t} {a} @ {p} ({s})",
-        t=ticker, a=action, p=price, s=strategy or "no strategy",
+        "TradingView webhook — {t} {a} @ {p} ({s}) hash={h}",
+        t=ticker, a=action, p=price, s=strategy or "no strategy", h=payload_hash,
     )
 
     return {
@@ -175,6 +212,8 @@ async def receive_webhook(
         "action": action,
         "signal_value": signal_value,
         "series_id": series_id,
+        "dedup_key": dedup_key,
+        "payload_hash": payload_hash,
         "timestamp": now.isoformat(),
     }
 

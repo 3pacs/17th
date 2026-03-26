@@ -27,6 +27,10 @@ import Options from './views/Options.jsx';
 import Heatmap from './views/Heatmap.jsx';
 import Flows from './views/Flows.jsx';
 import WeightSliders from './views/WeightSliders.jsx';
+import Knowledge from './views/Knowledge.jsx';
+import WatchlistAnalysis from './views/WatchlistAnalysis.jsx';
+import Operator from './views/Operator.jsx';
+import Snapshots from './views/Snapshots.jsx';
 
 const styles = {
     app: {
@@ -129,6 +133,10 @@ function App() {
             case 'flows': return <Flows />;
             case 'weights': return <WeightSliders />;
             case 'hyperspace': return <Hyperspace />;
+            case 'knowledge': return <Knowledge />;
+            case 'watchlist': return <WatchlistAnalysis />;
+            case 'operator': return <Operator />;
+            case 'snapshots': return <Snapshots />;
             case 'settings': return <Settings onLogout={() => { clearAuth(); }} />;
             default: return <Dashboard onNavigate={navigate} />;
         }

@@ -349,6 +349,8 @@ class OperatorState:
         self.last_daily_digest: datetime | None = None
         self.last_100x_digest: datetime | None = None
         self.last_oracle_cycle: datetime | None = None
+        self.last_hypothesis_test: datetime | None = None
+        self.last_backtest_scan: datetime | None = None
         self.consecutive_failures: int = 0
         self.cycle_count: int = 0
         self.fixes_applied: int = 0
@@ -900,6 +902,7 @@ def run_self_diagnostics(
                     "Available commands:\n"
                     "- RUN_REGIME — re-run regime detection\n"
                     "- RUN_FEATURES — recompute feature importance\n"
+                    "- RUN_HYPOTHESIS_TESTS — backtest all CANDIDATE hypotheses\n"
                     "- REPULL:<source_name> — re-pull a specific source\n"
                     "- RUN_PIPELINE — trigger full pipeline\n"
                     "- VACUUM_DB — run VACUUM ANALYZE\n"
@@ -962,6 +965,15 @@ def run_self_diagnostics(
                     else:
                         log.info("Hermes wants REPULL:{s} but source in cooldown", s=source)
                         result["actions_taken"].append({"cmd": cmd, "status": "cooldown"})
+
+                elif cmd == "RUN_HYPOTHESIS_TESTS":
+                    log.info("Hermes action: running hypothesis backtests")
+                    from analysis.hypothesis_tester import run_all_tests
+                    ht_result = run_all_tests(engine)
+                    result["actions_taken"].append({
+                        "cmd": cmd, "status": "ok",
+                        "tested": ht_result["tested"], "passed": ht_result["passed"],
+                    })
 
                 elif cmd == "RUN_PIPELINE":
                     log.info("Hermes action: triggering pipeline")
@@ -1178,6 +1190,56 @@ def run_cycle(state: OperatorState, dry_run: bool = False) -> dict[str, Any]:
                 cycle_result["autoresearch"] = ar_result
         except Exception as exc:
             log.warning("Autoresearch failed: {e}", e=str(exc))
+
+    # 6b. Backtest scanner (weekly when healthy — discovers new strategies)
+    if health["overall_healthy"]:
+        try:
+            now_bs = datetime.now(timezone.utc)
+            hours_since_bs = 999
+            if hasattr(state, 'last_backtest_scan') and state.last_backtest_scan is not None:
+                hours_since_bs = (now_bs - state.last_backtest_scan).total_seconds() / 3600
+            if hours_since_bs >= 168:  # weekly
+                log.info("Running backtest scanner (weekly)...")
+                if not dry_run:
+                    from analysis.backtest_scanner import run_full_scan
+                    bs_result = run_full_scan(engine)
+                    cycle_result["backtest_scanner"] = bs_result
+                    state.last_backtest_scan = now_bs
+                    log.info(
+                        "Backtest scanner: {w} winners, {h} hypotheses created",
+                        w=bs_result["winners"], h=bs_result["hypotheses_created"],
+                    )
+                else:
+                    log.info("[DRY RUN] Would run backtest scanner")
+        except Exception as exc:
+            log.warning("Backtest scanner failed: {e}", e=str(exc))
+
+    # 6c. Hypothesis testing (every 12 hours when healthy — feeds paper trading)
+    if health["overall_healthy"]:
+        try:
+            now_ht = datetime.now(timezone.utc)
+            hours_since_ht = 999
+            if hasattr(state, 'last_hypothesis_test') and state.last_hypothesis_test is not None:
+                hours_since_ht = (now_ht - state.last_hypothesis_test).total_seconds() / 3600
+            if hours_since_ht >= 12:
+                log.info("Running hypothesis backtesting...")
+                if not dry_run:
+                    from analysis.hypothesis_tester import run_all_tests
+                    ht_result = run_all_tests(engine)
+                    cycle_result["hypothesis_testing"] = {
+                        "tested": ht_result["tested"],
+                        "passed": ht_result["passed"],
+                        "failed": ht_result["failed"],
+                    }
+                    state.last_hypothesis_test = now_ht
+                    log.info(
+                        "Hypothesis testing: {t} tested, {p} passed, {f} failed",
+                        t=ht_result["tested"], p=ht_result["passed"], f=ht_result["failed"],
+                    )
+                else:
+                    log.info("[DRY RUN] Would run hypothesis testing")
+        except Exception as exc:
+            log.warning("Hypothesis testing failed: {e}", e=str(exc))
 
     # 7. UX Audit (every 6 hours when healthy)
     if health["overall_healthy"] and hermes_ok:
