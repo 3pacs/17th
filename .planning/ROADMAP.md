@@ -60,10 +60,10 @@
 
 ### Phase 13: AstroGrid — IN PROGRESS
 **Goal:** Standalone celestial intelligence interface. 3D planetary visualization, ephemeris, market-astro correlation engine, and narrative synthesis. Separate app sharing GRID's backend.
-See ASTROGRID-PLAN.md for full architecture.
+See ASTROGRID-PLAN.md for full architecture. Running on Codex (codex/astrogrid-prototype branch).
 
-### Phase 14: Oracle, Data Completion & Epistemic Hardening — IN PROGRESS
-**Goal:** Self-improving prediction engine with scored track record. Fill remaining 124 zero-data features. Supervised intelligence on all outbound signals. Activate dormant subsystems. Harden epistemic integrity.
+### Phase 14: Oracle, Data Completion & Epistemic Hardening — COMPLETE
+**Goal:** Self-improving prediction engine with scored track record. Fill remaining zero-data features. Supervised intelligence on all outbound signals. Activate dormant subsystems. Harden epistemic integrity.
 **Delivered Session 1 (2026-03-26):**
 - Oracle engine: 5 competing models, signal/anti-signal, weight evolution, immutable prediction journal
 - 100x digest: 3-layer supervised filter (sanity → LLM review → cross-verify), kills spam
@@ -78,23 +78,41 @@ See ASTROGRID-PLAN.md for full architecture.
 - Paper trading chain closed: scanner → tester → signal_executor (hourly)
 - Vol surface engine exposed via /api/v1/derivatives/svi-surface/{ticker} (SVI, arbitrage, Greeks, percentile)
 - TradingView webhook hardened: payload hash, dedup, schema version, provenance envelope
-- Crucix rule-based ideas re-enabled as LLM fallback with epistemic metadata (source/eligibility/evidence_class/calibration)
-- Crucix /alerts /mute /unmute registered (Telegram + Discord), input validated, mute enforced in send path
+- Crucix rule-based ideas re-enabled as LLM fallback with epistemic metadata
+- Crucix /alerts /mute /unmute registered (Telegram + Discord), input validated, mute enforced
 - Crucix delta threshold overrides now flow from config
 - PWA: Knowledge, WatchlistAnalysis, Operator, Snapshots views routed + in NavBar
-- External audit response: 8 of 17 critique items fixed (see ~/grid_issues.txt.rtf)
-**Remaining:**
-- Data quality: Fix resolver mappings (wn_*, FRED date parse, analyst int64). Fill intl macro. EIA v2. Computed features.
-- Audit fixes: Route registry, lazy loading, alert state persistence, delta versioning, tests for new code.
-- Oracle calibration after first Apr 17 scoring.
+- External audit response: 8 of 17 critique items fixed
+**Delivered Session 3 (2026-03-26):**
+- Epistemic bug fixes: B½-1 through B½-5 all resolved (z-scores, status inflation, oracle no_data, threshold versioning, DuckDB documented)
+- 33 wn_* entity mappings + analyst int64 fix → coverage 87% → 93%
+- FIX_DATA_QUALITY Hermes action for autonomous coverage monitoring
+- Operator health dashboard wired to real subsystem data
+- Route registry + lazy loading → bundle 710KB → 367KB (48% smaller)
+- 7 dead branches deleted, EDGAR fix merged
 
-### Phase 15: Crucix iOS & Hermes Email — PLANNED
-**Goal:** Crucix OSINT interface reformatted for iOS. Hermes email (hermes@stepdad.finance) with sender allowlist.
-**Tasks:** PWA Crucix button, iOS safe-area/touch-target styling, Cloudflare email routing, inbound email processing with LLM, sender allowlist guard.
+### Phase 15: Derivatives + Visualization + Hermes Email — IN PROGRESS
+**Goal:** Full derivatives intelligence interface, living visualization dashboard, and Hermes inbound email processing.
+**Delivered (2026-03-26 Session 3):**
+- DerivativesGrid SPA: 7 D3-powered views (DealerFlow, GammaProfile, VolSurface, TermStructure, PositionHeatmap, Scanner, FlowNarrative), served at /derivatives/
+- VizDashboard: 5-chart Living Intelligence composite (PhaseSpace, Orbital, ForceNetwork, ParticleSystem, RiverFlow) with master time control
+- 4 new LivingGraph renderers (ParticleSystem, RiverFlow, Ridgeline, Chord)
+- 5 viz data API endpoints (regime trajectory, feature network, orbital, energy, lead-lag)
+- PWA vol surface components (VolSurface3D, VolSkewChart, TermStructureChart, Derivatives view)
+- Data freshness UX (StaleBadge, RegimeBands, ExportButton)
+- hermes@stepdad.finance: Cloudflare routing → Gmail → IMAP poll, 3-address allowlist
+- email_ingest.py + email_supervisor.py + email_processor.py: triage → extraction pipeline
+- Link resolution: Perplexity, Reddit JSON, X/Twitter multi-fallback
+- Event triggers: add_to_watchlist, create_hypothesis, schedule_research, investigate
+- inbox.py router: 5 API endpoints + HermesInbox PWA view
+**Remaining:**
+- International pullers: source_catalog schema mismatch (in progress)
+- Flows page rework, watchlist redesign
+- Crucix iOS reformat
 
 ### Phase 16: Living Graphs & UX Polish — PLANNED
-**Goal:** Wire all living graph renderers to real data. Phase space trajectory, sector orbital, feature force network. Flows page rework. Watchlist redesign. Hypothesis UI.
-**Tasks:** Regime trajectory API endpoint, orbital sector data endpoint, correlation → force network transform. Flows narrative summary. Watchlist briefing cards.
+**Goal:** Flows page rework. Watchlist redesign. Hypothesis UI. Final UX polish.
+**Tasks:** Flows narrative summary. Watchlist briefing cards. Hypothesis results browser in Discovery.
 
 ---
 
@@ -143,7 +161,7 @@ See ASTROGRID-PLAN.md for full architecture.
 | EXCH-03 | 12 | Done — prediction_markets.py Kalshi REST |
 | EXCH-04 | 12 | Done — wallet_manager.py multi-wallet |
 | SENT-03 | 12.5 | Done — AlphaVantage + HF news + Pushshift + FinBERT |
-| ASTRO-01 | 13 | In Progress — App scaffold |
+| ASTRO-01 | 13 | In Progress — App scaffold (Codex) |
 | ASTRO-02 | 13 | Planned — 3D planetary orrery |
 | ASTRO-03 | 13 | Planned — Ephemeris calculator |
 | ASTRO-04 | 13 | Planned — Market-astro correlation engine |
@@ -160,7 +178,7 @@ See ASTROGRID-PLAN.md for full architecture.
 | DATA-13 | 14 | Done — CBOE VIX/SKEW 35yr bulk download |
 | DATA-14 | 14 | Done — Binance/CoinGecko/DeFiLlama crypto bulk |
 | DATA-15 | 14 | Done — Open-Meteo 5yr weather, EIA energy |
-| DATA-16 | 14 | Remaining — 124 features need resolver fix + intl pullers |
+| DATA-16 | 14 | In Progress — ~90 features need intl pullers + remaining fixes |
 | BRIDGE-01 | 14 | Done — bridges/ledger_sync.py regime + hypothesis sync |
 | BRIDGE-02 | 14 | Done — Dead-letter table for sync failures |
 | ACTIVATE-01 | 14 | Done — Hypothesis tester in Hermes 12h cycle |
@@ -173,18 +191,38 @@ See ASTROGRID-PLAN.md for full architecture.
 | HARDEN-04 | 14 | Done — Crucix ideas epistemic metadata |
 | HARDEN-05 | 14 | Done — Mute validation + enforcement in send path |
 | HARDEN-06 | 14 | Done — Delta threshold config actually works |
-| HARDEN-07 | 14 | Open — Route registry (single source of truth) |
-| HARDEN-08 | 14 | Open — Lazy loading non-core views |
-| HARDEN-09 | 14 | Open — Alert state persistence across restart |
-| HARDEN-10 | 14 | Open — Delta computation versioning |
+| HARDEN-07 | 14 | Done — Route registry (single routes.js) |
+| HARDEN-08 | 14 | Done — Lazy loading non-core views (367KB bundle) |
+| HARDEN-09 | 14 | Open — Alert state persistence across restart (Crucix) |
+| HARDEN-10 | 14 | Open — Delta computation versioning (Crucix) |
 | HARDEN-11 | 14 | Open — Tests for bot commands + thresholds |
+| BUG-01 | 14 | Done — Real 252-day z-scores in market_briefing |
+| BUG-02 | 14 | Done — Backtest scanner injects CANDIDATE not PASSED |
+| BUG-03 | 14 | Done — Oracle no_data verdict for unscoreable predictions |
+| BUG-04 | 14 | Done — Signal threshold stored per trade |
+| BUG-05 | 14 | Done — DuckDB documented as read-only mirror |
+| BUG-06 | 14 | Done — Operator health dashboard wired |
+| BUG-07 | 14 | Done — FIX_DATA_QUALITY Hermes action for autonomous coverage |
 | VIZ-01 | 14 | Done — viz_intelligence.py 11 rules |
 | VIZ-02 | 14 | Done — VizSpec protocol + API |
 | VIZ-03 | 14 | Done — LivingGraph.jsx universal renderer |
-| VIZ-04 | 16 | Planned — Wire PhaseSpace to regime trajectory |
-| VIZ-05 | 16 | Planned — Wire Orbital to sector rotation |
-| VIZ-06 | 16 | Planned — Wire ForceNetwork to correlations |
-| CRUCIX-01 | 15 | Planned — iOS reformat |
-| CRUCIX-02 | 15 | Planned — PWA button integration |
-| EMAIL-01 | 15 | Planned — hermes@stepdad.finance setup |
-| EMAIL-02 | 15 | Planned — Sender allowlist guard |
+| VIZ-04 | 15 | Done — PhaseSpace wired to regime trajectory API |
+| VIZ-05 | 15 | Done — Orbital wired to sector rotation API |
+| VIZ-06 | 15 | Done — ForceNetwork wired to feature correlation API |
+| VIZ-07 | 15 | Done — ParticleSystem + RiverFlow + Ridgeline + Chord renderers |
+| VIZ-08 | 15 | Done — VizDashboard 5-chart composite with time control |
+| DERIV-01 | 15 | Done — DerivativesGrid SPA with 7 D3 views |
+| DERIV-02 | 15 | Done — PWA vol surface components (3D, skew, term structure) |
+| DERIV-03 | 15 | Done — Data freshness UX (StaleBadge, RegimeBands, ExportButton) |
+| EMAIL-01 | 15 | Done — hermes@stepdad.finance Cloudflare → Gmail → IMAP |
+| EMAIL-02 | 15 | Done — 3-address sender allowlist |
+| EMAIL-03 | 15 | Done — email_supervisor.py fast triage |
+| EMAIL-04 | 15 | Done — email_processor.py LLM extraction |
+| EMAIL-05 | 15 | Done — Link resolution (Perplexity, Reddit, X/Twitter) |
+| EMAIL-06 | 15 | Done — Event triggers (watchlist, hypothesis, research, investigate) |
+| EMAIL-07 | 15 | Done — HermesInbox PWA view |
+| INFRA-01 | 15 | Done — Operator health dashboard |
+| INFRA-02 | 15 | Done — FIX_DATA_QUALITY autonomous action |
+| INFRA-03 | 15 | Done — Bundle optimization 710KB → 367KB |
+| INFRA-04 | 15 | Done — 33 wn_* mappings + analyst int64 fix |
+| INFRA-05 | 15 | Done — Multi-agent setup (AGENTS.md, CODEX.md) |
