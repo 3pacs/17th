@@ -249,6 +249,15 @@ NEW_MAPPINGS_V2: dict[str, str] = {
     # Polymarket
     "POLYMARKET:btc": "polymarket_btc",
 
+    # BCB (Brazil Central Bank)
+    "brazil_selic_rate": "brazil_selic_rate",
+    "brazil_ipca_yoy": "brazil_ipca_yoy",
+    "brazil_credit_growth": "brazil_credit_growth",
+    "brazil_trade_balance": "brazil_trade_balance",
+    "brazil_usd_brl": "brazil_usd_brl",
+    "brazil_discount_rate": "brazil_discount_rate",
+    "brazil_primary_balance_gdp": "brazil_primary_balance_gdp",
+
     # WorldNews sentiment (GDELT-sourced)
     "wn_geopolitical_article_count": "wn_geopolitical_article_count",
     "wn_geopolitical_sentiment_avg": "wn_geopolitical_sentiment_avg",
