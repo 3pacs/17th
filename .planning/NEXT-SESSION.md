@@ -1,63 +1,41 @@
-# Next Session Plan — Updated 2026-03-26 (after Session 3)
+# Next Session Plan — Updated 2026-03-27 (after Session 3 continued)
 
 Everything the next agent needs to pick up and execute. No ambiguity, no guessing.
 
 ---
 
-## PRIORITY 1: Fix International Puller Schema + Fill Data Gaps (1-2 hours)
+## PRIORITY 1: Fill Remaining Data Gaps (71 features → target <30)
 
-### 1a. Fix source_catalog schema mismatch
-**Problem:** International pullers (BCB, AKShare, KOSIS, OECD, ECB, MAS) fail because they expect a `source_catalog` table with a schema that doesn't match what exists. This was being fixed at end of Session 3.
-**Steps:**
-1. Check what schema the pullers expect vs what's in DB
-2. Either ALTER TABLE to add missing columns or update pullers to match existing schema
-3. Run each puller after fix
+**DONE:** Schema fix (13 pullers), BCB pulled (1402 rows), wn_* mapped (33), spy_macd computed, analyst int64 fixed.
+**DONE:** 10 operator_issues queued for Hermes to work through autonomously.
 
-### 1b. Run international pullers (macro coverage 60% → target 85%)
-Commands (run after 1a fix):
-- Brazil (3): `from ingestion.international.bcb import BCBPuller`
-- China (4): `from ingestion.international.akshare_macro import AKSharePuller`
-- Korea (2): `from ingestion.international.kosis import KOSISPuller`
-- OECD (3): `from ingestion.international.oecd import OECDPuller`
-- ECB (1): `from ingestion.international.ecb import ECBPuller`
-- MAS (1): `from ingestion.international.mas import MASPuller`
+### 1a. External API fixes needed (manual investigation)
+- **ECB**: ConnectionError — check if ECB SDW API changed URL or needs proxy
+- **OECD**: SDMX API returns 400/no data — likely endpoint restructure
+- **KOSIS**: JSONDecodeError — Korean API format changed, needs parser update
+- **OFR**: FSM API endpoint changed — try FRED STLFSI2 as proxy (3 systemic features)
+- **pump.fun**: API may be dead — try DexScreener for 5 crypto features
 
-### 1c. Systemic risk (0% coverage)
-- OFR Financial Stress API returned 400 — URL format changed
-- Try FRED alternative: STLFSI2 (St. Louis Fed Financial Stress Index)
-- If neither works, scrape from OFR website
+### 1b. Computed features (derive from existing data)
+- copper_gold_ratio, sp500_mom_3m, vix_3m_ratio, hy_spread_proxy, dxy_index
+- Pattern: same as spy_macd — compute from resolved_series, insert with full PIT columns
 
-### 1d. Trade features (33% coverage)
-- Comtrade API or FRED proxies: BOPGSTB (trade balance), EXPGS (exports)
+### 1c. Analyst ratings (26 sentiment features)
+- Re-run yfinance recommendations for: CI, CMCSA, DVN, EOG, GD, HD, MA, PFE
+- int64 fix is in place, should work now
 
-### 1e. Computed features (derive from existing data)
-- copper_gold_ratio, sp500_mom_3m, vix_3m_ratio, hy_spread_proxy, dxy_index, spy_macd, etc.
-- Run `fill_missing_features.py --batch computed`
+### 1d. USDA features (2 commodity)
+- corn_yield_forecast, wheat_planted_acres — needs USDA_NASS_API_KEY in .env
 
-### 1f. FRED date parsing
-- fedfred library returns dates in value column for some series
-- Fix df.reset_index() iteration in fill_missing_features.py
-
-### 1g. Run resolver after all fixes
-```bash
-cd /data/grid_v4/grid_repo/grid
-PYTHONPATH=. /data/grid_v4/venv/bin/python -c "
-from normalization.resolver import Resolver
-from db import get_engine
-r = Resolver(db_engine=get_engine())
-result = r.resolve_pending()
-print(result)
-"
-```
+### 1e. Trade features (2)
+- FRED proxies: BOPGSTB (trade balance), EXPGS → compute us_china_trade_balance, trade_volume_yoy
 
 ---
 
 ## PRIORITY 2: Remaining Audit Items (1-2 hours)
 
-### 2a. A3: Persistent Alert State for Crucix
-**Problem:** `_muteUntil` and `_alertHistory` are in-memory. Lost on restart.
-**Files:** `Crucix/server.mjs`, `Crucix/lib/alerts/telegram.mjs`, `Crucix/lib/alerts/discord.mjs`
-**Fix:** Create `Crucix/lib/alerts/state.mjs` with `AlertStateStore` class. Read/write to `runs/memory/alert_state.json`. Both alerters share store. Mute state survives restart.
+### ~~2a. A3: Persistent Alert State for Crucix~~ DONE
+AlertStateStore created in Crucix/lib/alerts/state.mjs. Wired into Telegram + Discord alerters. Mute state + history persists to runs/memory/alert_state.json.
 
 ### 2b. A4: Delta Computation Versioning
 **Files:** `Crucix/lib/delta/memory.mjs`, `Crucix/lib/delta/engine.mjs`
